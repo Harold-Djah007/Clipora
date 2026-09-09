@@ -1,8 +1,10 @@
 package com.threadvault.app
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -22,6 +24,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         captureSharedUrl(intent)
+        requestNotificationPermissionIfNeeded()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -59,6 +62,17 @@ class MainActivity : FlutterActivity() {
                         result.error("SERVICE_FAILED", e.message ?: "Could not start download service", null)
                     }
                 }
+                "showDownloadComplete" -> {
+                    val title = call.argument<String>("title") ?: "Clipora"
+                    val message = call.argument<String>("message") ?: "Download finished."
+                    val success = call.argument<Boolean>("success") ?: true
+                    try {
+                        DownloadForegroundService.complete(this, title, message, success)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("NOTIFICATION_FAILED", e.message ?: "Could not show completion notification", null)
+                    }
+                }
                 "stopDownloadService" -> {
                     try {
                         DownloadForegroundService.stop(this)
@@ -75,6 +89,12 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7108)
     }
 
     private fun captureSharedUrl(intent: Intent?) {
