@@ -31,6 +31,22 @@ void main() {
     expect(post.media.first.url, endsWith('video.mp4'));
   });
 
+  test('prefixes backend file fallback paths with the resolver base URL', () {
+    final post = UniversalResolverService.postFromJson(
+      {
+        'post_id': 'yt1',
+        'author': 'creator',
+        'media': [
+          {'media_type': 'video', 'url': '/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'},
+        ],
+      },
+      fallbackUrl: 'https://youtu.be/abc',
+      baseUrl: 'http://192.168.1.10:8010',
+    );
+
+    expect(post.media.single.url, 'http://192.168.1.10:8010/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
+
   test('rejects universal resolver JSON without media', () {
     expect(
       () => UniversalResolverService.postFromJson({'media': []}, fallbackUrl: 'https://example.com'),

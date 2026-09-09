@@ -4,6 +4,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 import '../../app/app_state.dart';
 import '../../models/media_models.dart';
+import '../../services/platform_services.dart';
 import '../../services/universal_platform_detector.dart';
 import '../../widgets/premium_card.dart';
 import '../../widgets/threadvault_mark.dart';
@@ -25,7 +26,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _readClipboard());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _readSharedUrl();
+      await _readClipboard();
+    });
   }
 
   @override
@@ -37,7 +41,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _readClipboard();
+    if (state == AppLifecycleState.resumed) {
+      _readSharedUrl();
+      _readClipboard();
+    }
   }
 
   List<String> _extractUrls(String raw) {
@@ -48,6 +55,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       if (seen.add(value)) out.add(value);
     }
     return out;
+  }
+
+  Future<void> _readSharedUrl() async {
+    final shared = await PlatformServices.takeSharedUrl();
+    if (!mounted || shared == null) return;
+    final urls = _extractUrls(shared);
+    if (urls.isEmpty) return;
+    setState(() {
+      controller.text = urls.join('\n');
+      clipboardUrl = urls.first;
+    });
   }
 
   Future<void> _readClipboard() async {
@@ -192,10 +210,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
           const PremiumCard(
             child: Column(
               children: [
-                _Step(n: '1', text: 'Copy a social media post, video, reel, short, pin, or public story link.'),
+                _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
                 _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
-                _Step(n: '3', text: 'Threads/private-safe flows use local capture so Clipora never asks for your password.'),
-                _Step(n: '4', text: 'The file is validated, saved, and published to your Gallery.'),
+                _Step(n: '3', text: 'Threads stays on local capture. Instagram and Facebook fall back to capture if the backend cannot resolve them.'),
+                _Step(n: '4', text: 'Set Resolver URL in Settings to your PC LAN IP, then the file is validated and saved to Gallery.'),
               ],
             ),
           ),
@@ -225,7 +243,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
     return CliporaPill(
       icon: match.icon,
       label: match.label,
-      value: match.isThreads ? 'capture' : match.preferBackend ? 'backend' : 'check',
+      value: match.isThreads
+          ? 'capture'
+          : match.usesCaptureFallback
+              ? 'backend+'
+              : match.preferBackend
+                  ? 'backend'
+                  : 'check',
       color: match.accent,
     );
   }

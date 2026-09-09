@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../app/app_state.dart';
+import '../../services/resolver_url.dart';
 import '../../services/settings_store.dart';
 import '../../widgets/premium_card.dart';
 import '../../widgets/threadvault_mark.dart';
@@ -13,29 +14,69 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController filename;
+  late final TextEditingController resolver;
+  String? resolverStatus;
+  bool resolverBusy = false;
 
   @override
   void initState() {
     super.initState();
     filename = TextEditingController();
+    resolver = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      filename.text = context.read<AppState>().settings.filenameTemplate;
+      final s = context.read<AppState>().settings;
+      filename.text = s.filenameTemplate;
+      resolver.text = s.resolverUrl;
     });
   }
 
   @override
   void dispose() {
     filename.dispose();
+    resolver.dispose();
     super.dispose();
   }
 
   Future<void> _update(AppSettings s) => context.read<AppState>().setSettings(s);
+
+  Future<bool> _saveResolver() async {
+    final raw = resolver.text.trim().isEmpty ? ResolverUrl.defaultValue : resolver.text.trim();
+    if (!ResolverUrl.isAllowed(raw)) {
+      setState(() => resolverStatus = 'Use http://127.0.0.1:8010, http://10.0.2.2:8010, or your PC LAN IP such as http://192.168.1.10:8010.');
+      return false;
+    }
+    final value = ResolverUrl.normalize(raw);
+    resolver.text = value;
+    await _update(context.read<AppState>().settings.copyWith(resolverUrl: value));
+    setState(() => resolverStatus = 'Saved $value');
+    return true;
+  }
+
+  Future<void> _testResolver() async {
+    final saved = await _saveResolver();
+    if (!saved || !mounted) return;
+    setState(() {
+      resolverBusy = true;
+      resolverStatus = 'Checking backend…';
+    });
+    try {
+      final base = await context.read<AppState>().universalResolver.ping();
+      if (!mounted) return;
+      setState(() => resolverStatus = 'Connected: $base');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => resolverStatus = error.toString().replaceFirst('Bad state: ', '').replaceFirst('StateError: ', ''));
+    } finally {
+      if (mounted) setState(() => resolverBusy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final s = state.settings;
     if (filename.text.isEmpty) filename.text = s.filenameTemplate;
+    if (resolver.text.isEmpty) resolver.text = s.resolverUrl;
 
     return CliporaPage(
       child: ListView(
@@ -43,7 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const CliporaSectionTitle(
             title: 'Settings',
-            subtitle: 'Downloads, filenames, and session privacy',
+            subtitle: 'Resolver, downloads, filenames, and session privacy',
           ),
           const SizedBox(height: 18),
           CliporaHeroCard(
@@ -57,6 +98,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Text('A quiet saver for links you can already view.', style: TextStyle(color: Colors.white70, height: 1.3)),
                 ]),
               ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          PremiumCard(
+            glow: true,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const _PanelTitle(
+                icon: Icons.dns_rounded,
+                title: 'Resolver',
+                subtitle: 'PC backend the phone uses for TikTok, X, YouTube, and the rest',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: resolver,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Resolver URL',
+                  helperText: 'Same Wi-Fi: http://192.168.x.x:8010   USB: http://127.0.0.1:8010',
+                  prefixIcon: Icon(Icons.link_rounded),
+                ),
+                onSubmitted: (_) => _saveResolver(),
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: resolverBusy ? null : _saveResolver,
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: const Text('Save URL'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: resolverBusy ? null : _testResolver,
+                    icon: resolverBusy
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.health_and_safety_outlined, size: 18),
+                    label: Text(resolverBusy ? 'Checking…' : 'Test'),
+                  ),
+                ),
+              ]),
+              if (resolverStatus != null) ...[
+                const SizedBox(height: 10),
+                Text(resolverStatus!, style: const TextStyle(color: Colors.white70, height: 1.35)),
+              ],
             ]),
           ),
           const SizedBox(height: 16),
@@ -144,7 +231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.4'),
+              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.5'),
               SizedBox(height: 12),
               Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass Threads access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),

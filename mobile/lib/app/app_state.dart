@@ -17,7 +17,7 @@ class AppState extends ChangeNotifier {
   final sessionService = SessionService();
   late final DownloadManager downloadManager = DownloadManager(historyStore);
   final settingsStore = SettingsStore();
-  final universalResolver = UniversalResolverService();
+  late UniversalResolverService universalResolver = UniversalResolverService();
 
   AppSettings settings = const AppSettings();
   List<DownloadRecord> history = [];
@@ -28,6 +28,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     settings = await settingsStore.load();
+    universalResolver = UniversalResolverService(preferredBaseUrl: settings.resolverUrl);
     history = await historyStore.load();
     sessionConnected = await sessionService.hasSession(ttlHours: settings.sessionTtlHours);
     _sessionTimer?.cancel();
@@ -45,6 +46,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> setSettings(AppSettings next) async {
     settings = next;
+    universalResolver = UniversalResolverService(preferredBaseUrl: next.resolverUrl);
     await settingsStore.save(next);
     if (next.autoDeleteSession) {
       sessionConnected = await sessionService.hasSession(ttlHours: next.sessionTtlHours);
@@ -156,10 +158,20 @@ class AppState extends ChangeNotifier {
       return parser.parse(source, url);
     }
 
-    status = 'Resolving ${platform.label} with Clipora backend…';
-    await PlatformServices.updateDownloadService(message: status!);
-    notifyListeners();
-    return universalResolver.resolve(url);
+    try {
+      status = 'Resolving ${platform.label} with Clipora backend…';
+      await PlatformServices.updateDownloadService(message: status!);
+      notifyListeners();
+      return await universalResolver.resolve(url);
+    } catch (error) {
+      if (!platform.usesCaptureFallback) rethrow;
+      status = 'Backend could not resolve ${platform.label}. Opening Smart Capture…';
+      await PlatformServices.updateDownloadService(message: status!);
+      notifyListeners();
+      final source = await sourceLoader(url);
+      debugPrint('[Clipora] ${platform.label} capture fallback source bytes=${source.length}');
+      return parser.parse(source, url);
+    }
   }
 
   @override

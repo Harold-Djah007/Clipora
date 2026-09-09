@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/media_models.dart';
 import 'history_store.dart';
 import 'platform_services.dart';
+import 'resolver_url.dart';
 import 'settings_store.dart';
 
 class DownloadManager {
@@ -186,14 +187,15 @@ class DownloadManager {
     if (_looksLikePageAsset(host, lower)) return false;
     if (_looksLikeAudio(lower)) return false;
     if (lower.contains('.m3u8') || lower.contains('m3u8')) return false;
+    if (uri.scheme == 'http' && !ResolverUrl.isPrivateHost(host)) return false;
 
     if (_isThreadsSource(sourceUrl)) {
       return _isStrictThreadsMediaUrl(host, lower);
     }
 
     // Universal links come from the backend resolver, then the downloaded bytes are
-    // verified before publishing. This keeps TikTok/X/Facebook/etc. working without
-    // weakening the old strict Threads guard that stopped wrong PNG/audio downloads.
+    // verified before publishing. HTTP is limited to the local/LAN resolver used for
+    // HLS file fallback. Threads still uses the old Instagram/fbcdn guard.
     return true;
   }
 

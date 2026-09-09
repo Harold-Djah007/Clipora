@@ -23,4 +23,11 @@ void main() {
     expect(UniversalPlatformDetector.detect('not a url').isSupported, isFalse);
     expect(UniversalPlatformDetector.detect('https://example.com/video').platform, SocialPlatform.unknown);
   });
+
+  test('marks Instagram and Facebook for Smart Capture fallback', () {
+    expect(UniversalPlatformDetector.detect('https://www.instagram.com/reel/abc/').usesCaptureFallback, isTrue);
+    expect(UniversalPlatformDetector.detect('https://www.facebook.com/watch/?v=1').usesCaptureFallback, isTrue);
+    expect(UniversalPlatformDetector.detect('https://vm.tiktok.com/ZMh/').usesCaptureFallback, isFalse);
+    expect(UniversalPlatformDetector.detect('https://www.threads.com/@user/post/abc').isThreads, isTrue);
+  });
 }

@@ -7,3 +7,4 @@ resolution and approximate size.
 
 UNIVERSAL_RESOLVE_ENDPOINT = "/api/resolve/universal"
 PLATFORM_DETECT_ENDPOINT = "/api/detect"
+RESOLVED_FILE_ENDPOINT = "/api/files"

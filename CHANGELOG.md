@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5 Phone-ready universal saver
+- Added a Resolver URL setting with a backend health check for LAN and USB testing.
+- Bound the Windows start script to `0.0.0.0` and printed the PC LAN address for phone tests.
+- Added Share-to-Clipora for Android text/plain share intents.
+- Instagram and Facebook now fall back to Smart Capture when the backend cannot resolve the public link.
+- Added an additive HLS file fallback: if yt-dlp has no direct MP4, the backend downloads the file and serves `/api/files/{token}`.
+- Kept Threads on the existing local Smart Capture path. No watermark-removal. No platform passwords.
+
 ## 0.8.4 Universal Resolver Foundation
 - Added backend platform detection for Threads, TikTok, Instagram, X/Twitter, Pinterest, Facebook, Snapchat public/share links, and YouTube/Shorts.
 - Added `yt-dlp`-powered universal resolver foundation for supported public/share links.

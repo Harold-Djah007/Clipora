@@ -1,44 +1,44 @@
 import 'package:dio/dio.dart';
 import '../models/media_models.dart';
+import 'resolver_url.dart';
 import 'universal_platform_detector.dart';
 
 class UniversalResolverService {
   final Dio _dio;
-  final List<String> baseUrls;
+  String preferredBaseUrl;
 
-  UniversalResolverService({Dio? dio, List<String>? baseUrls})
+  UniversalResolverService({Dio? dio, String? preferredBaseUrl})
       : _dio = dio ??
             Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 3),
-              sendTimeout: const Duration(seconds: 8),
-              receiveTimeout: const Duration(seconds: 45),
+              connectTimeout: const Duration(seconds: 4),
+              sendTimeout: const Duration(seconds: 12),
+              receiveTimeout: const Duration(seconds: 180),
               validateStatus: (code) => code != null && code >= 200 && code < 500,
               headers: const {'Content-Type': 'application/json'},
             )),
-        baseUrls = baseUrls ??
-            const [
-              'http://127.0.0.1:8010',
-              'http://127.0.0.1:8011',
-              'http://127.0.0.1:8765',
-              'http://10.0.2.2:8010',
-            ];
+        preferredBaseUrl = preferredBaseUrl ?? ResolverUrl.defaultValue;
 
-  Future<PlatformMatch> detect(String url) async {
-    final local = UniversalPlatformDetector.detect(url);
-    if (!local.isSupported) return local;
+  List<String> get baseUrls => ResolverUrl.candidates(preferredBaseUrl);
 
+  Future<String> ping() async {
+    Object? lastError;
     for (final baseUrl in baseUrls) {
       try {
-        final response = await _dio.post('$baseUrl/api/detect', data: {'url': url});
-        final data = response.data;
-        if (response.statusCode == 200 && data is Map) {
-          return UniversalPlatformDetector.detect(url);
-        }
-      } catch (_) {
-        // Local detector is enough for the UI. Network failure is handled by resolve().
+        final response = await _dio.get(
+          '$baseUrl/api/health',
+          options: Options(
+            connectTimeout: const Duration(seconds: 3),
+            receiveTimeout: const Duration(seconds: 3),
+          ),
+        );
+        if (response.statusCode == 200) return baseUrl;
+      } on DioException catch (error) {
+        lastError = error;
       }
     }
-    return local;
+    throw StateError(
+      'Clipora backend is not reachable. Keep start_api.ps1 running, set Resolver URL to your PC LAN IP, or run adb reverse tcp:8010 tcp:8010. Last error: ${_shortError(lastError)}',
+    );
   }
 
   Future<ResolvedPost> resolve(String url) async {
@@ -52,8 +52,8 @@ class UniversalResolverService {
       try {
         final response = await _dio.post('$baseUrl/api/resolve/universal', data: {'url': url});
         final data = response.data;
-        if (response.statusCode == 200 && data is Map<String, dynamic>) {
-          return postFromJson(data, fallbackUrl: url);
+        if (response.statusCode == 200 && data is Map) {
+          return postFromJson(Map<String, dynamic>.from(data), fallbackUrl: url, baseUrl: baseUrl);
         }
         if (response.statusCode != null && response.statusCode! >= 400) {
           throw StateError(_extractBackendError(data, response.statusCode));
@@ -67,11 +67,15 @@ class UniversalResolverService {
     }
 
     throw StateError(
-      'Clipora backend is not reachable. Keep backend running, then run: adb reverse tcp:8010 tcp:8010. Last error: ${_shortError(lastError)}',
+      'Clipora backend is not reachable. In Settings, set Resolver URL to the address printed by start_api.ps1. USB option: adb reverse tcp:8010 tcp:8010. Last error: ${_shortError(lastError)}',
     );
   }
 
-  static ResolvedPost postFromJson(Map<String, dynamic> json, {required String fallbackUrl}) {
+  static ResolvedPost postFromJson(
+    Map<String, dynamic> json, {
+    required String fallbackUrl,
+    String? baseUrl,
+  }) {
     final rawMedia = json['media'];
     if (rawMedia is! List) {
       throw const FormatException('Universal resolver returned no media list.');
@@ -87,7 +91,7 @@ class UniversalResolverService {
       media.add(
         ResolvedMedia(
           kind: kind,
-          url: url,
+          url: _absolutize(url.trim(), baseUrl),
           width: _asInt(entry['width']),
           height: _asInt(entry['height']),
           mimeType: entry['mime_type'] as String? ?? (kind == MediaKind.video ? 'video/mp4' : 'image/jpeg'),
@@ -106,6 +110,11 @@ class UniversalResolverService {
       caption: (json['caption'] ?? json['title'])?.toString(),
       media: media,
     );
+  }
+
+  static String _absolutize(String url, String? baseUrl) {
+    if (baseUrl != null && url.startsWith('/')) return '$baseUrl$url';
+    return url;
   }
 
   static int? _asInt(Object? value) {

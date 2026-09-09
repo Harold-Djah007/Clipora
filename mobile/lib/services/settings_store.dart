@@ -7,6 +7,7 @@ class AppSettings {
   final int sessionTtlHours;
   final bool wifiOnly;
   final int maxConcurrentDownloads;
+  final String resolverUrl;
 
   const AppSettings({
     this.filenameTemplate = '{author}_{postId}_{index}',
@@ -15,6 +16,7 @@ class AppSettings {
     this.sessionTtlHours = 24,
     this.wifiOnly = false,
     this.maxConcurrentDownloads = 5,
+    this.resolverUrl = 'http://127.0.0.1:8010',
   });
 
   AppSettings copyWith({
@@ -24,6 +26,7 @@ class AppSettings {
     int? sessionTtlHours,
     bool? wifiOnly,
     int? maxConcurrentDownloads,
+    String? resolverUrl,
   }) => AppSettings(
         filenameTemplate: filenameTemplate ?? this.filenameTemplate,
         includeCaption: includeCaption ?? this.includeCaption,
@@ -31,6 +34,7 @@ class AppSettings {
         sessionTtlHours: sessionTtlHours ?? this.sessionTtlHours,
         wifiOnly: wifiOnly ?? this.wifiOnly,
         maxConcurrentDownloads: maxConcurrentDownloads ?? this.maxConcurrentDownloads,
+        resolverUrl: resolverUrl ?? this.resolverUrl,
       );
 }
 
@@ -51,6 +55,7 @@ class SettingsStore {
       sessionTtlHours: p.getInt('sessionTtlHours') ?? 24,
       wifiOnly: p.getBool('wifiOnly') ?? false,
       maxConcurrentDownloads: (lanes ?? 5).clamp(1, 6).toInt(),
+      resolverUrl: p.getString('resolverUrl') ?? 'http://127.0.0.1:8010',
     );
   }
 
@@ -62,6 +67,7 @@ class SettingsStore {
     await p.setInt('sessionTtlHours', s.sessionTtlHours);
     await p.setBool('wifiOnly', s.wifiOnly);
     await p.setInt('maxConcurrentDownloads', s.maxConcurrentDownloads.clamp(1, 6).toInt());
+    await p.setString('resolverUrl', s.resolverUrl);
     await p.setBool('clipora080TurboMigrated', true);
   }
 }

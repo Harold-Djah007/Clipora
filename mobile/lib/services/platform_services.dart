@@ -52,4 +52,14 @@ class PlatformServices {
       await _channel.invokeMethod<void>('stopDownloadService');
     } catch (_) {}
   }
+
+  static Future<String?> takeSharedUrl() async {
+    try {
+      final value = await _channel.invokeMethod<String>('takeSharedUrl');
+      if (value == null || value.trim().isEmpty) return null;
+      return value.trim();
+    } catch (_) {
+      return null;
+    }
+  }
 }

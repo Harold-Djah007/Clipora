@@ -16,6 +16,8 @@ class PlatformMatch {
   bool get isSupported => platform != SocialPlatform.unknown;
   bool get isThreads => platform == SocialPlatform.threads;
   bool get preferBackend => isSupported && !isThreads;
+  bool get usesCaptureFallback =>
+      platform == SocialPlatform.instagram || platform == SocialPlatform.facebook;
 
   String get label {
     switch (platform) {

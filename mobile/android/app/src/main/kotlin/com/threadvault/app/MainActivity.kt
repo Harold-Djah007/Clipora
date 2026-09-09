@@ -2,9 +2,11 @@ package com.threadvault.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
@@ -15,6 +17,18 @@ import java.io.FileInputStream
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.threadvault.app/platform"
+    private var sharedUrl: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureSharedUrl(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureSharedUrl(intent)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -53,9 +67,24 @@ class MainActivity : FlutterActivity() {
                         result.error("SERVICE_FAILED", e.message ?: "Could not stop download service", null)
                     }
                 }
+                "takeSharedUrl" -> {
+                    val value = sharedUrl
+                    sharedUrl = null
+                    result.success(value)
+                }
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun captureSharedUrl(intent: Intent?) {
+        if (intent == null) return
+        val raw = intent.getStringExtra(Intent.EXTRA_TEXT)
+            ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
+            ?: intent.data?.toString()
+        if (raw.isNullOrBlank()) return
+        val match = Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE).find(raw)
+        sharedUrl = (match?.value ?: raw).trim().trimEnd(',', '.', ';', ')')
     }
 
     private fun publishMedia(sourcePath: String, fileName: String, mimeType: String): String {

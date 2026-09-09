@@ -90,4 +90,4 @@ Write-Host ".\.venv\Scripts\python.exe -m pytest -q" -ForegroundColor White
 Write-Host "Start API with:" -ForegroundColor Green
 Write-Host "powershell -ExecutionPolicy Bypass -File .\scripts\start_api.ps1" -ForegroundColor White
 Write-Host "Manual fallback:" -ForegroundColor Green
-Write-Host ".\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010" -ForegroundColor White
+Write-Host ".\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8010" -ForegroundColor White

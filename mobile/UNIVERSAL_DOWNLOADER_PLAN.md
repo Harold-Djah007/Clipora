@@ -24,6 +24,12 @@ Paste link
 6. Add Queue screen polish: platform, quality, progress, retry, saved location.
 7. Store files by platform folders under Clipora.
 
+Phone testing:
+
+1. `powershell -ExecutionPolicy Bypass -File .\scripts\start_api.ps1`
+2. In Clipora Settings, set Resolver URL to the printed LAN address.
+3. Tap Test, then share or paste a public TikTok or X link.
+
 ## Do not regress
 
 - Do not bring back the poster-JPG bug.

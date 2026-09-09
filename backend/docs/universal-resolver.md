@@ -24,6 +24,9 @@ POST /api/detect
 POST /api/resolve/universal
 → returns source page metadata and validated direct media candidates
 
+GET /api/files/{token}
+→ serves a locally downloaded HLS/DASH file when no direct MP4 exists
+
 POST /api/downloads
 → creates a download job using the same universal provider
 ```
@@ -33,7 +36,7 @@ POST /api/downloads
 - Threads uses the existing `threads_provider` to avoid breaking the private-video fix.
 - Other supported platforms use `yt-dlp` as a resolver engine.
 - The provider prefers direct MP4 files because the current Android downloader can save direct files cleanly.
-- HLS `.m3u8` streams are skipped for now until a dedicated ffmpeg/mobile streaming pipeline is added.
+- HLS `.m3u8` streams are not returned as mobile URLs. If a link is HLS-only, the backend downloads it locally and exposes `/api/files/{token}` for the phone.
 - Photo-only links can return the largest image thumbnail only when no direct video candidate exists.
 
 ## Safety boundaries
@@ -45,4 +48,4 @@ POST /api/downloads
 
 ## Next mobile task
 
-Add a `UniversalResolverService` in Flutter so the home screen can detect TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, and Threads links before choosing the resolver path.
+Phone testing: start the backend with `scripts/start_api.ps1`, set Resolver URL in the app to the printed LAN address, then share or paste a public TikTok or X link.

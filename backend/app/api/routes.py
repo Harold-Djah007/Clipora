@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from app.core.version import API_SERVICE_NAME, API_VERSION
 from app.schemas.download import DownloadRequest
 from app.services.download_service import create_job, get_job
+from app.services.file_cache import media_file_cache
 from app.services.session_store import session_store
 from app.services.threads_provider import provider
 from app.services.universal_provider import universal_provider
@@ -17,7 +20,7 @@ class ResolveRequest(BaseModel):
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": "clipora", "version": "0.8.4-universal-foundation"}
+    return {"ok": True, "service": API_SERVICE_NAME, "version": API_VERSION}
 
 @router.post("/session/connect")
 def connect_session(body: SessionConnect, x_user_id: str = Header(default="local-user")):
@@ -55,6 +58,16 @@ async def resolve_universal(body: ResolveRequest, x_user_id: str = Header(defaul
         return await universal_provider.resolve(body.url, session_store.get(x_user_id))
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/files/{token}")
+def get_resolved_file(token: str):
+    path = media_file_cache.get(token)
+    if path is None:
+        raise HTTPException(404, "Resolved file expired. Save the link again.")
+    media_type = "video/mp4" if path.suffix.lower() == ".mp4" else None
+    return FileResponse(path, filename=path.name, media_type=media_type)
+
 
 @router.post("/downloads")
 async def downloads(body: DownloadRequest, x_user_id: str = Header(default="local-user")):
