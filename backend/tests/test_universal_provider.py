@@ -34,3 +34,46 @@ def test_image_thumbnail_used_only_when_no_video_exists():
     assert len(media) == 1
     assert media[0].media_type == "image"
     assert media[0].url.endswith("large.jpg")
+
+
+def test_carousel_keeps_every_video_entry():
+    provider = UniversalProvider()
+    info = {
+        "id": "carousel",
+        "entries": [
+            {
+                "id": "one",
+                "formats": [
+                    {"url": "https://cdn.example/clip-a.mp4", "ext": "mp4", "height": 720, "vcodec": "h264"},
+                ],
+            },
+            {
+                "id": "two",
+                "formats": [
+                    {"url": "https://cdn.example/clip-b.mp4", "ext": "mp4", "height": 1080, "vcodec": "h264"},
+                ],
+            },
+        ],
+    }
+
+    media = provider._collect_all_media("https://x.com/user/status/123", info)
+
+    assert [item.url for item in media] == [
+        "https://cdn.example/clip-a.mp4",
+        "https://cdn.example/clip-b.mp4",
+    ]
+
+
+def test_single_post_still_returns_one_best_file():
+    provider = UniversalProvider()
+    info = {
+        "formats": [
+            {"url": "https://cdn.example/video-360.mp4", "ext": "mp4", "height": 360, "width": 640, "vcodec": "h264"},
+            {"url": "https://cdn.example/video-720.mp4", "ext": "mp4", "height": 720, "width": 1280, "vcodec": "h264"},
+        ]
+    }
+
+    media = provider._collect_all_media("https://www.tiktok.com/@x/video/1", info)
+
+    assert len(media) == 1
+    assert media[0].url.endswith("video-720.mp4")

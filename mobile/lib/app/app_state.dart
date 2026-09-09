@@ -25,6 +25,7 @@ class AppState extends ChangeNotifier {
   bool busy = false;
   String? status;
   bool lastRunHadErrors = false;
+  int lastRunSaved = 0;
 
   Future<void> init() async {
     settings = await settingsStore.load();
@@ -79,6 +80,7 @@ class AppState extends ChangeNotifier {
     if (urls.isEmpty || busy) return;
     busy = true;
     lastRunHadErrors = false;
+    lastRunSaved = 0;
     status = 'Clipora queue ready: ${urls.length} link${urls.length == 1 ? '' : 's'}…';
     await PlatformServices.startDownloadService(message: status!);
     notifyListeners();
@@ -130,6 +132,7 @@ class AppState extends ChangeNotifier {
 
       history = await historyStore.load();
       lastRunHadErrors = failed > 0;
+      lastRunSaved = saved;
       if (failed == 0) {
         status = 'Done: saved $saved media item${saved == 1 ? '' : 's'} to your Clipora folders';
       } else if (saved > 0) {

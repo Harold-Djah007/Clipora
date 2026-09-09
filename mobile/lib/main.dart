@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app/app_state.dart';
@@ -7,6 +6,7 @@ import 'features/downloads/downloads_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/session/session_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'widgets/clipora_launch.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -133,7 +133,7 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 2400), () {
+    Timer(const Duration(milliseconds: 3200), () {
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -147,215 +147,6 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
       child: _ready ? const HomeShell(key: ValueKey('home')) : const CliporaLaunchScreen(key: ValueKey('launch')),
     );
   }
-}
-
-class CliporaLaunchScreen extends StatefulWidget {
-  const CliporaLaunchScreen({super.key});
-
-  @override
-  State<CliporaLaunchScreen> createState() => _CliporaLaunchScreenState();
-}
-
-class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF020716),
-      body: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          final p = Curves.easeInOutCubic.transform(_controller.value);
-          final textOpacity = ((p - .62) / .28).clamp(0.0, 1.0).toDouble();
-          final scale = .94 + (.06 * Curves.easeOutCubic.transform(p));
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: CustomPaint(painter: _SocialThreadInflowPainter(progress: p)),
-              ),
-              Center(
-                child: Transform.scale(
-                  scale: scale,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 168,
-                        height: 168,
-                        child: CustomPaint(painter: _CliporaMarkPainter(progress: p)),
-                      ),
-                      const SizedBox(height: 22),
-                      Opacity(
-                        opacity: textOpacity,
-                        child: const Column(
-                          children: [
-                            Text(
-                              'Clipora',
-                              style: TextStyle(fontSize: 36, height: 1, fontWeight: FontWeight.w900, letterSpacing: -1.2),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'save • share • keep',
-                              style: TextStyle(
-                                color: Color(0x99FFFFFF),
-                                fontSize: 12,
-                                letterSpacing: 3.2,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SocialThreadInflowPainter extends CustomPainter {
-  final double progress;
-  const _SocialThreadInflowPainter({required this.progress});
-
-  static const _threads = <Color>[
-    Color(0xFF00F2EA),
-    Color(0xFFFF0050),
-    Color(0xFF1877F2),
-    Color(0xFFFA7E1E),
-    Color(0xFF962FBF),
-    Color(0xFFFFFC00),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final reach = math.max(size.width, size.height) * .62;
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    for (var i = 0; i < _threads.length; i++) {
-      final color = _threads[i];
-      final delay = i * .07;
-      final travel = ((progress - delay) / .72).clamp(0.0, 1.0).toDouble();
-      if (travel <= 0) continue;
-      final eased = Curves.easeInOutCubic.transform(travel);
-      final startAngle = (math.pi * 2 * i / _threads.length) - .35;
-      final start = Offset(
-        center.dx + math.cos(startAngle) * reach,
-        center.dy + math.sin(startAngle) * reach,
-      );
-      final endRadius = 78.0;
-      final end = Offset(
-        center.dx + math.cos(startAngle + 2.4) * endRadius,
-        center.dy + math.sin(startAngle + 2.4) * endRadius,
-      );
-      final control = Offset(
-        center.dx + math.cos(startAngle + 1.1) * (reach * (1 - eased * .55)),
-        center.dy + math.sin(startAngle + 1.1) * (reach * (1 - eased * .55)),
-      );
-      final path = Path()
-        ..moveTo(start.dx, start.dy)
-        ..quadraticBezierTo(control.dx, control.dy, end.dx, end.dy);
-      final metrics = path.computeMetrics().toList();
-      if (metrics.isEmpty) continue;
-      final drawn = metrics.first.extractPath(0, metrics.first.length * eased);
-      final fade = travel < .12 ? travel / .12 : (travel > .88 ? (1 - ((travel - .88) / .12)) : 1.0);
-      paint
-        ..strokeWidth = 3.2
-        ..color = color.withOpacity(.18 * fade)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-      canvas.drawPath(drawn, paint);
-      paint
-        ..maskFilter = null
-        ..strokeWidth = 2.4
-        ..color = color.withOpacity(.78 * fade);
-      canvas.drawPath(drawn, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SocialThreadInflowPainter oldDelegate) => oldDelegate.progress != progress;
-}
-
-class _CliporaMarkPainter extends CustomPainter {
-  final double progress;
-  const _CliporaMarkPainter({required this.progress});
-
-  static const _ribbons = <Color>[
-    Color(0xFF00F2EA),
-    Color(0xFFFF0050),
-    Color(0xFF1877F2),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final tile = RRect.fromRectAndRadius(
-      Rect.fromCircle(center: center, radius: size.shortestSide * .46),
-      Radius.circular(size.shortestSide * .22),
-    );
-    final tileOpacity = ((progress - .08) / .28).clamp(0.0, 1.0).toDouble();
-    canvas.drawRRect(
-      tile,
-      Paint()..color = const Color(0xFF07111F).withOpacity(.92 * tileOpacity),
-    );
-    canvas.drawRRect(
-      tile,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4
-        ..color = Colors.white.withOpacity(.10 * tileOpacity),
-    );
-
-    final arc = Rect.fromCircle(center: center, radius: size.shortestSide * .27);
-    final cProgress = ((progress - .18) / .52).clamp(0.0, 1.0).toDouble();
-    final triProgress = ((progress - .58) / .28).clamp(0.0, 1.0).toDouble();
-
-    for (var i = 0; i < _ribbons.length; i++) {
-      final ribbon = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = size.shortestSide * (.11 - i * .018)
-        ..color = _ribbons[i].withOpacity(.90 - i * .12);
-      canvas.drawArc(arc.inflate(i * size.shortestSide * .012), math.pi * .58, math.pi * 1.68 * cProgress, false, ribbon);
-    }
-
-    final tri = Path()
-      ..moveTo(center.dx - size.width * .02, center.dy - size.height * .10)
-      ..lineTo(center.dx - size.width * .02, center.dy + size.height * .10)
-      ..lineTo(center.dx + size.width * .13, center.dy)
-      ..close();
-    if (triProgress > 0) {
-      canvas.drawPath(
-        tri,
-        Paint()
-          ..style = PaintingStyle.fill
-          ..color = Colors.white.withOpacity(.92 * triProgress),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _CliporaMarkPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
 class HomeShell extends StatefulWidget {

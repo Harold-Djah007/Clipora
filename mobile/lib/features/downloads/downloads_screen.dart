@@ -19,6 +19,7 @@ class DownloadsScreen extends StatefulWidget {
 class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingObserver {
   final controller = TextEditingController();
   String? clipboardUrl;
+  final _consumedUrls = <String>{};
 
   static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 
@@ -74,8 +75,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
     if (!mounted) return;
     setState(() {
       clipboardUrl = urls.isEmpty ? null : urls.first;
-      if (controller.text.trim().isEmpty && urls.isNotEmpty) {
-        controller.text = urls.join('\n');
+      final fresh = urls.where((url) => !_consumedUrls.contains(url)).toList();
+      if (controller.text.trim().isEmpty && fresh.isNotEmpty) {
+        controller.text = fresh.join('\n');
       }
     });
   }
@@ -101,6 +103,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
         return source;
       },
     );
+    if (!mounted) return;
+    final app = context.read<AppState>();
+    if (app.lastRunSaved > 0) {
+      setState(() {
+        _consumedUrls.addAll(urls);
+        controller.clear();
+        clipboardUrl = null;
+      });
+    }
   }
 
   @override
@@ -213,7 +224,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
                 _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
                 _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
                 _Step(n: '3', text: 'Threads stays on local capture. Instagram and Facebook fall back to capture if the backend cannot resolve them.'),
-                _Step(n: '4', text: 'Set Resolver URL in Settings to your PC LAN IP, then the file is validated and saved to Gallery.'),
+                _Step(n: '4', text: 'Every video and photo in the post is saved. After a successful save, the paste box clears.'),
               ],
             ),
           ),
