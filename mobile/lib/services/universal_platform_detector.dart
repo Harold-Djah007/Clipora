@@ -53,7 +53,7 @@ class PlatformMatch {
       case SocialPlatform.pinterest:
         return Icons.push_pin_rounded;
       case SocialPlatform.facebook:
-        return Icons.facebook_rounded;
+        return Icons.public_rounded;
       case SocialPlatform.snapchat:
         return Icons.flash_on_rounded;
       case SocialPlatform.youtube:
