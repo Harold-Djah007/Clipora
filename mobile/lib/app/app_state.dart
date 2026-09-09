@@ -178,28 +178,46 @@ class AppState extends ChangeNotifier {
     Future<String> Function(String url) sourceLoader,
   ) async {
     if (platform.isThreads) {
-      status = 'Capturing Threads media quietly in the background…';
-      await PlatformServices.updateDownloadService(message: status!);
-      notifyListeners();
-      final source = await sourceLoader(url);
-      debugPrint('[Clipora] Threads capture source bytes=${source.length}');
-      return parser.parse(source, url);
+      return _resolveWithCapture(url, platform, sourceLoader, reason: 'Capturing Threads media quietly on this phone…');
     }
 
-    try {
-      status = 'Resolving ${platform.label} with Clipora backend…';
-      await PlatformServices.updateDownloadService(message: status!);
-      notifyListeners();
-      return await universalResolver.resolve(url);
-    } catch (error) {
-      if (!platform.usesCaptureFallback) rethrow;
-      status = 'Backend could not resolve ${platform.label}. Capturing quietly in the background…';
-      await PlatformServices.updateDownloadService(message: status!);
-      notifyListeners();
-      final source = await sourceLoader(url);
-      debugPrint('[Clipora] ${platform.label} capture fallback source bytes=${source.length}');
-      return captureParser.parse(source, url, platform);
+    // Field Mode: app works without a PC/server. Backend is optional, used only
+    // when the seller/user configured one for stronger universal extraction.
+    if (universalResolver.hasConfiguredBackend) {
+      try {
+        status = 'Resolving ${platform.label} with optional Clipora backend…';
+        await PlatformServices.updateDownloadService(message: status!);
+        notifyListeners();
+        return await universalResolver.resolve(url);
+      } catch (error) {
+        debugPrint('[Clipora] optional backend unavailable for ${platform.label}, using phone capture: $error');
+      }
     }
+
+    return _resolveWithCapture(
+      url,
+      platform,
+      sourceLoader,
+      reason: 'Field Mode: capturing ${platform.label} media on this phone…',
+    );
+  }
+
+  Future<ResolvedPost> _resolveWithCapture(
+    String url,
+    PlatformMatch platform,
+    Future<String> Function(String url) sourceLoader, {
+    required String reason,
+  }) async {
+    status = reason;
+    await PlatformServices.updateDownloadService(message: status!);
+    notifyListeners();
+
+    final source = await sourceLoader(url);
+    debugPrint('[Clipora] ${platform.label} field capture source bytes=${source.length}');
+    if (platform.isThreads) {
+      return parser.parse(source, url);
+    }
+    return captureParser.parse(source, url, platform);
   }
 
   @override
