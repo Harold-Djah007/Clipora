@@ -26,7 +26,7 @@ class UniversalCaptureParser {
     if (!media.any((item) => item.kind == MediaKind.video)) {
       if (videoHint) {
         throw FormatException(
-          '${platform.label} opened, but the page only exposed a poster image so far. Play the video once in Smart Capture, then tap Capture again.',
+          '${platform.label} opened, but the page only exposed a poster image so far. Play the video once in Field Mode, then tap Save again.',
         );
       }
       _extractImages(normalized, media);
@@ -36,24 +36,39 @@ class UniversalCaptureParser {
     for (final item in media) {
       final cleaned = _unescape(item.url);
       if (!_isAllowedCaptureMediaUrl(cleaned)) continue;
-      unique[cleaned] = ResolvedMedia(
+      final normalizedItem = ResolvedMedia(
         kind: item.kind,
         url: cleaned,
         width: item.width,
         height: item.height,
         mimeType: item.mimeType,
       );
+      final key = _mediaIdentityKey(cleaned, item.kind);
+      final existing = unique[key];
+      if (existing == null || _qualityScore(normalizedItem) > _qualityScore(existing)) {
+        unique[key] = normalizedItem;
+      }
     }
 
     var values = unique.values.toList(growable: false);
     final videos = values.where((item) => item.kind == MediaKind.video).toList(growable: false);
     if (videos.isNotEmpty) {
-      values = videos;
+      // Keep all real videos, then keep only strong extra images. This avoids saving
+      // single poster thumbnails while still allowing mixed carousel posts to keep
+      // their photo slides when several large images are exposed by the page.
+      final imageSlides = values
+          .where((item) => item.kind == MediaKind.image)
+          .where((item) => !_isLikelyPosterImage(item, videos))
+          .toList(growable: false);
+      values = [
+        ...videos,
+        if (imageSlides.length >= 2) ...imageSlides,
+      ];
     }
     values = values.take(maxCapturedMedia).toList(growable: false);
     if (values.isEmpty) {
       throw FormatException(
-        'No real ${platform.label} media was found in Field Mode. Open the post, wait for it to load, play the video once, then tap Capture.',
+        'No real ${platform.label} media was found in Field Mode. Open the post, wait for it to load, play the video once, then tap Save again.',
       );
     }
 
@@ -210,6 +225,42 @@ class UniversalCaptureParser {
         lower.endsWith('.mp3') ||
         lower.endsWith('.aac') ||
         lower.endsWith('.ogg');
+  }
+
+  bool _isLikelyPosterImage(ResolvedMedia image, List<ResolvedMedia> videos) {
+    final score = _qualityScore(image);
+    if (score < 480 * 480) return true;
+    final imageUri = Uri.tryParse(image.url);
+    if (imageUri == null) return false;
+    final imageHost = imageUri.host.toLowerCase();
+    for (final video in videos) {
+      if (image.width != null && image.height != null && video.width != null && video.height != null) {
+        final sameShape = (image.width! - video.width!).abs() <= 8 && (image.height! - video.height!).abs() <= 8;
+        if (sameShape) return true;
+      }
+      final videoUri = Uri.tryParse(video.url);
+      if (videoUri != null && imageHost == videoUri.host.toLowerCase() && imageUri.pathSegments.isNotEmpty) {
+        final file = imageUri.pathSegments.last.toLowerCase();
+        if (file.contains('poster') || file.contains('thumb') || file.contains('cover')) return true;
+      }
+    }
+    return false;
+  }
+
+  int _qualityScore(ResolvedMedia item) {
+    final width = item.width ?? 0;
+    final height = item.height ?? 0;
+    if (width > 0 && height > 0) return width * height;
+    return item.kind == MediaKind.video ? 1 : 0;
+  }
+
+  String _mediaIdentityKey(String url, MediaKind kind) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host.isEmpty) return '${kind.name}:$url';
+    final host = uri.host.toLowerCase();
+    final path = uri.path;
+    if (path.isNotEmpty && path != '/') return '${kind.name}:$host$path';
+    return '${kind.name}:$url';
   }
 
   String? _extractCaption(String source) {
