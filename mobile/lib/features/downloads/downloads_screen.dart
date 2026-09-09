@@ -294,6 +294,7 @@ class _CapturePageState extends State<_CapturePage> {
   InAppWebViewController? _controller;
   String _status = 'Opening post';
   bool _done = false;
+  bool _pageLoaded = false;
 
   static const _js = r'''
     (function() {
@@ -330,12 +331,18 @@ class _CapturePageState extends State<_CapturePage> {
         _done = true;
         if (mounted) Navigator.pop(context, source);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _status = 'Capture is waiting for the page. Play the video once, then tap Capture.');
+    }
   }
 
   String _unquote(String raw) {
     if (raw.length < 2) return raw;
     return raw.substring(1, raw.length - 1).replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
+  }
+
+  void _cancel() {
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -344,28 +351,89 @@ class _CapturePageState extends State<_CapturePage> {
       backgroundColor: const Color(0xFF07090F),
       appBar: AppBar(
         title: Text(_status, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        leading: IconButton(
+          tooltip: 'Back',
+          onPressed: _cancel,
+          icon: const Icon(Icons.close_rounded),
+        ),
         actions: [
           TextButton(onPressed: () => _capture(force: true), child: const Text('Capture')),
         ],
       ),
-      body: InAppWebView(
-        initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          thirdPartyCookiesEnabled: true,
-          cacheEnabled: true,
-          mediaPlaybackRequiresUserGesture: false,
-          allowsInlineMediaPlayback: true,
-        ),
-        onWebViewCreated: (c) => _controller = c,
-        onLoadStop: (_, __) async {
-          if (!mounted) return;
-          setState(() => _status = 'Reading media');
-          for (var i = 0; i < 12 && !_done; i++) {
-            await Future<void>.delayed(const Duration(milliseconds: 700));
-            await _capture();
-          }
-        },
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: InAppWebView(
+              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+              initialSettings: InAppWebViewSettings(
+                javaScriptEnabled: true,
+                thirdPartyCookiesEnabled: true,
+                cacheEnabled: true,
+                mediaPlaybackRequiresUserGesture: false,
+                allowsInlineMediaPlayback: true,
+              ),
+              onWebViewCreated: (c) => _controller = c,
+              onLoadStart: (_, __) {
+                if (mounted) {
+                  setState(() {
+                    _pageLoaded = false;
+                    _status = 'Opening post';
+                  });
+                }
+              },
+              onLoadStop: (_, __) async {
+                if (!mounted) return;
+                setState(() {
+                  _pageLoaded = true;
+                  _status = 'Reading media';
+                });
+                for (var i = 0; i < 12 && !_done; i++) {
+                  await Future<void>.delayed(const Duration(milliseconds: 700));
+                  await _capture();
+                }
+                if (!_done && mounted) {
+                  setState(() => _status = 'Play the video once, then tap Capture');
+                }
+              },
+            ),
+          ),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: SafeArea(
+              child: PremiumCard(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(_pageLoaded ? Icons.touch_app_rounded : Icons.sync_rounded, color: const Color(0xFF8BE9E0), size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_status, style: const TextStyle(fontWeight: FontWeight.w800))),
+                    ]),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Some social pages render as a black WebView while media loads. Wait a few seconds, play the video once, then tap Capture. Use Back to return safely.',
+                      style: TextStyle(color: Colors.white60, fontSize: 12.5, height: 1.3),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      TextButton(onPressed: _cancel, child: const Text('Back')),
+                      const Spacer(),
+                      FilledButton.icon(
+                        onPressed: () => _capture(force: true),
+                        icon: const Icon(Icons.center_focus_strong_rounded, size: 18),
+                        label: const Text('Capture'),
+                      ),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
