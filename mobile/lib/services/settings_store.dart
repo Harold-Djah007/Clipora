@@ -16,7 +16,7 @@ class AppSettings {
     this.sessionTtlHours = 24,
     this.wifiOnly = false,
     this.maxConcurrentDownloads = 5,
-    this.resolverUrl = 'http://127.0.0.1:8010',
+    this.resolverUrl = '',
   });
 
   AppSettings copyWith({
@@ -55,7 +55,7 @@ class SettingsStore {
       sessionTtlHours: p.getInt('sessionTtlHours') ?? 24,
       wifiOnly: p.getBool('wifiOnly') ?? false,
       maxConcurrentDownloads: (lanes ?? 5).clamp(1, 6).toInt(),
-      resolverUrl: p.getString('resolverUrl') ?? 'http://127.0.0.1:8010',
+      resolverUrl: p.getString('resolverUrl') ?? '',
     );
   }
 
