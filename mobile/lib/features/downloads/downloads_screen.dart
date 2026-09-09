@@ -678,7 +678,7 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
       onWebViewCreated: (c) => _controller = c,
       onProgressChanged: (_, progress) {
         if (progress > 35 && !_done) {
-          unawaited(_capture(finalAttempt: progress >= 100));
+          unawaited(_capture());
         }
       },
       onLoadStop: (_, __) async {
