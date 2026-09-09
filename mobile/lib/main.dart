@@ -19,15 +19,18 @@ Future<void> main() async {
 class CliporaApp extends StatelessWidget {
   const CliporaApp({super.key});
 
+  static const _cyan = Color(0xFF00F2EA);
+  static const _pink = Color(0xFFFF0050);
+  static const _blue = Color(0xFF1877F2);
+
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF00E5FF);
     final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
+      seedColor: _cyan,
       brightness: Brightness.dark,
-      primary: seed,
-      secondary: const Color(0xFF8B5CF6),
-      tertiary: const Color(0xFF22D3EE),
+      primary: _cyan,
+      secondary: _pink,
+      tertiary: _blue,
       surface: const Color(0xFF0A1024),
     );
 
@@ -43,16 +46,12 @@ class CliporaApp extends StatelessWidget {
               bodyColor: Colors.white,
               displayColor: Colors.white,
             ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: false,
-        ),
+        appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0, centerTitle: false),
         navigationBarTheme: NavigationBarThemeData(
           height: 68,
           backgroundColor: Colors.transparent,
           elevation: 0,
-          indicatorColor: const Color(0xFF00E5FF).withOpacity(.16),
+          indicatorColor: _cyan.withOpacity(.16),
           labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
                 fontSize: 11,
                 letterSpacing: -.15,
@@ -76,9 +75,9 @@ class CliporaApp extends StatelessWidget {
             borderRadius: BorderRadius.circular(22),
             borderSide: BorderSide(color: Colors.white.withOpacity(.10)),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: const BorderSide(color: Color(0xFF22D3EE), width: 1.5),
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(22)),
+            borderSide: BorderSide(color: Color(0xFF22D3EE), width: 1.5),
           ),
         ),
         filledButtonTheme: FilledButtonThemeData(
@@ -136,7 +135,7 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 2850), () {
+    Timer(const Duration(milliseconds: 3050), () {
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -165,7 +164,7 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2700))..forward();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2950))..forward();
   }
 
   @override
@@ -185,7 +184,7 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
             child: AnimatedBuilder(
               animation: _controller,
               builder: (context, _) => CustomPaint(
-                painter: _CliporaLaunchPainter(progress: Curves.easeInOutCubic.transform(_controller.value)),
+                painter: _SocialLaunchStreakPainter(progress: Curves.easeInOutCubic.transform(_controller.value)),
               ),
             ),
           ),
@@ -194,42 +193,37 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
               animation: _controller,
               builder: (context, _) {
                 final p = _controller.value;
-                final textOpacity = ((p - .62) / .28).clamp(0.0, 1.0).toDouble();
-                final scale = .94 + (.06 * Curves.easeOutBack.transform(p.clamp(0.0, 1.0).toDouble()));
+                final textOpacity = ((p - .58) / .30).clamp(0.0, 1.0).toDouble();
+                final scale = .88 + (.12 * Curves.easeOutBack.transform(p.clamp(0.0, 1.0).toDouble()));
                 return Transform.scale(
                   scale: scale,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        width: 190,
-                        height: 190,
+                        width: 196,
+                        height: 196,
                         child: CustomPaint(
-                          painter: _CliporaMarkPainter(progress: Curves.easeInOutCubic.transform(p)),
+                          painter: _SocialCliporaLogoPainter(progress: Curves.easeInOutCubic.transform(p), showWordmark: false),
                         ),
                       ),
                       const SizedBox(height: 20),
                       Opacity(
                         opacity: textOpacity,
-                        child: Column(
-                          children: const [
+                        child: const Column(
+                          children: [
                             Text(
                               'Clipora',
-                              style: TextStyle(
-                                fontSize: 38,
-                                height: 1,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -1.4,
-                              ),
+                              style: TextStyle(fontSize: 40, height: 1, fontWeight: FontWeight.w900, letterSpacing: -1.5),
                             ),
-                            SizedBox(height: 9),
+                            SizedBox(height: 10),
                             Text(
-                              'fast • private • yours',
+                              'all socials • one tap • gallery',
                               style: TextStyle(
-                                color: Color(0xB3FFFFFF),
-                                fontSize: 13,
-                                letterSpacing: 3.4,
-                                fontWeight: FontWeight.w700,
+                                color: Color(0xCCFFFFFF),
+                                fontSize: 12.5,
+                                letterSpacing: 2.6,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ],
@@ -247,88 +241,142 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   }
 }
 
-class _CliporaLaunchPainter extends CustomPainter {
+class _SocialLaunchStreakPainter extends CustomPainter {
   final double progress;
-  const _CliporaLaunchPainter({required this.progress});
+  const _SocialLaunchStreakPainter({required this.progress});
+
+  static const colors = <Color>[
+    Color(0xFF00F2EA),
+    Color(0xFFFF0050),
+    Color(0xFFFFFFFF),
+    Color(0xFF050505),
+    Color(0xFFFEDA75),
+    Color(0xFFFA7E1E),
+    Color(0xFFD62976),
+    Color(0xFF962FBF),
+    Color(0xFF1877F2),
+    Color(0xFF1DA1F2),
+    Color(0xFFE60023),
+    Color(0xFFFFFC00),
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final p = progress;
-    final glowPaint = Paint()
+    final maxRadius = math.max(size.width, size.height) * .72;
+    final streakPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    for (var i = 0; i < 42; i++) {
+      final phase = i / 42.0;
+      final lane = colors[i % colors.length];
+      final travel = ((progress * 1.22) - (phase * .35)).clamp(0.0, 1.0).toDouble();
+      final eased = Curves.easeOutCubic.transform(travel);
+      final angle = (math.pi * 2 * phase) + (math.sin(i * 1.7) * .42) + (progress * math.pi * .7);
+      final startR = maxRadius * (.84 + (.22 * math.sin(i * 2.3)));
+      final endR = 100 + (18 * math.sin(i * .9));
+      final radius = startR + ((endR - startR) * eased);
+      final head = Offset(center.dx + math.cos(angle) * radius, center.dy + math.sin(angle) * radius);
+      final tailR = radius + 58 + (18 * math.sin(i));
+      final tail = Offset(center.dx + math.cos(angle - .08) * tailR, center.dy + math.sin(angle - .08) * tailR);
+      final fadeIn = travel < .08 ? travel / .08 : 1.0;
+      final fadeOut = travel > .94 ? (1 - ((travel - .94) / .06)) : 1.0;
+      final opacity = (fadeIn * fadeOut).clamp(0.0, 1.0).toDouble();
+
+      streakPaint
+        ..strokeWidth = 2.0 + ((i % 5) * .75)
+        ..shader = LinearGradient(
+          colors: [lane.withOpacity(0), lane.withOpacity(.78 * opacity), Colors.white.withOpacity(.34 * opacity)],
+        ).createShader(Rect.fromPoints(tail, head));
+      canvas.drawLine(tail, head, streakPaint);
+
+      final particlePaint = Paint()..color = lane.withOpacity(.65 * opacity);
+      canvas.drawCircle(head, 1.6 + (2.2 * (1 - travel)), particlePaint);
+    }
+
+    final ringProgress = ((progress - .62) / .26).clamp(0.0, 1.0).toDouble();
+    final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 3;
-
-    for (var i = 0; i < 18; i++) {
-      final phase = (i / 18.0);
-      final travel = ((p * 1.15) - (phase * .42)).clamp(0.0, 1.0).toDouble();
-      final angle = (phase * math.pi * 2.4) + (p * math.pi * 1.2);
-      final startRadius = math.max(size.width, size.height) * (.46 + (.16 * math.sin(i)));
-      final endRadius = 98.0 + (12 * math.sin(i * 2.1));
-      final radius = startRadius + ((endRadius - startRadius) * Curves.easeOutCubic.transform(travel));
-      final pos = Offset(center.dx + math.cos(angle) * radius, center.dy + math.sin(angle) * radius);
-      final tail = Offset(center.dx + math.cos(angle - .11) * (radius + 38), center.dy + math.sin(angle - .11) * (radius + 38));
-      final opacity = ((travel < .04 ? travel / .04 : 1.0).clamp(0.0, 1.0).toDouble() * (1 - (travel > .96 ? (travel - .96) / .04 : 0)).clamp(0.0, 1.0).toDouble());
-      glowPaint.shader = LinearGradient(
-        colors: [
-          Color(0x0000E5FF),
-          Color.lerp(const Color(0xFF00E5FF), const Color(0xFFA855F7), phase)!.withOpacity(.55 * opacity),
-        ],
-      ).createShader(Rect.fromPoints(tail, pos));
-      canvas.drawLine(tail, pos, glowPaint);
-      final dot = Paint()..color = const Color(0xFF67E8F9).withOpacity(.62 * opacity);
-      canvas.drawCircle(pos, 2.2 + (2.4 * (1 - travel)), dot);
-    }
+      ..strokeWidth = 3
+      ..shader = SweepGradient(colors: colors).createShader(Rect.fromCircle(center: center, radius: 126));
+    canvas.drawArc(Rect.fromCircle(center: center, radius: 122), -math.pi / 2, math.pi * 2 * ringProgress, false, ring);
   }
 
   @override
-  bool shouldRepaint(covariant _CliporaLaunchPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _SocialLaunchStreakPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
-class _CliporaMarkPainter extends CustomPainter {
+class _SocialCliporaLogoPainter extends CustomPainter {
   final double progress;
-  const _CliporaMarkPainter({required this.progress});
+  final bool showWordmark;
+  const _SocialCliporaLogoPainter({required this.progress, required this.showWordmark});
+
+  static const colors = _SocialLaunchStreakPainter.colors;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide * .34;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final cProgress = ((progress - .10) / .58).clamp(0.0, 1.0).toDouble();
-    final triProgress = ((progress - .52) / .32).clamp(0.0, 1.0).toDouble();
-    final shine = (.5 + (.5 * math.sin(progress * math.pi * 2))).clamp(0.0, 1.0).toDouble();
+    final p = progress;
+    final iconRect = Rect.fromCenter(center: center, width: size.shortestSide * .86, height: size.shortestSide * .86);
+    final rrect = RRect.fromRectAndRadius(iconRect, Radius.circular(size.shortestSide * .18));
+
+    final bg = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF020617), Color(0xFF061A35), Color(0xFF16051F), Color(0xFF020617)],
+      ).createShader(rect);
+    canvas.drawRRect(rrect, bg);
+
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.shortestSide * .024
+      ..shader = SweepGradient(colors: colors).createShader(iconRect.inflate(8));
+    canvas.drawRRect(rrect, border);
+
+    final arcRect = Rect.fromCircle(center: center, radius: size.shortestSide * .26);
+    final cProgress = ((p - .08) / .56).clamp(0.0, 1.0).toDouble();
+    final triProgress = ((p - .48) / .34).clamp(0.0, 1.0).toDouble();
+    final shine = .5 + (.5 * math.sin(p * math.pi * 2));
 
     final glow = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .27
-      ..color = const Color(0xFF00E5FF).withOpacity(.18 + (.14 * shine))
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22);
-    canvas.drawArc(rect.inflate(1), math.pi * .62, math.pi * 1.72 * cProgress, false, glow);
+      ..strokeWidth = size.shortestSide * .18
+      ..color = const Color(0xFF00F2EA).withOpacity(.14 + (.08 * shine))
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.shortestSide * .10);
+    canvas.drawArc(arcRect.inflate(size.shortestSide * .02), math.pi * .58, math.pi * 1.72 * cProgress, false, glow);
+
+    for (var i = 0; i < colors.length; i++) {
+      final ribbon = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = size.shortestSide * (.015 + ((i % 3) * .004))
+        ..color = colors[i].withOpacity(i == 3 ? .28 : .60);
+      canvas.drawArc(arcRect.inflate((i - 5.5) * size.shortestSide * .004), math.pi * (.59 + i * .011), math.pi * 1.68 * cProgress, false, ribbon);
+    }
 
     final cPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .21
-      ..shader = SweepGradient(
-        startAngle: .4,
-        endAngle: math.pi * 2,
-        colors: const [Color(0xFF7C3AED), Color(0xFF2563EB), Color(0xFF22D3EE), Color(0xFFA855F7), Color(0xFF7C3AED)],
-      ).createShader(rect.inflate(18));
-    canvas.drawArc(rect, math.pi * .62, math.pi * 1.72 * cProgress, false, cPaint);
+      ..strokeWidth = size.shortestSide * .14
+      ..shader = SweepGradient(startAngle: .2 + p, endAngle: math.pi * 2, colors: colors).createShader(arcRect.inflate(18));
+    canvas.drawArc(arcRect, math.pi * .61, math.pi * 1.68 * cProgress, false, cPaint);
 
     final highlight = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .045
-      ..color = Colors.white.withOpacity(.36 * cProgress);
-    canvas.drawArc(rect.deflate(8), math.pi * 1.15, math.pi * .42 * cProgress, false, highlight);
+      ..strokeWidth = size.shortestSide * .018
+      ..color = Colors.white.withOpacity(.44 * cProgress);
+    canvas.drawArc(arcRect.deflate(size.shortestSide * .04), math.pi * 1.08, math.pi * .38 * cProgress, false, highlight);
 
     final triPath = Path()
-      ..moveTo(center.dx - size.width * .035, center.dy - size.height * .128)
-      ..lineTo(center.dx - size.width * .035, center.dy + size.height * .128)
-      ..lineTo(center.dx + size.width * .16, center.dy)
+      ..moveTo(center.dx - size.width * .020, center.dy - size.height * .100)
+      ..lineTo(center.dx - size.width * .020, center.dy + size.height * .100)
+      ..lineTo(center.dx + size.width * .135, center.dy)
       ..close();
     final metricPath = Path();
     for (final metric in triPath.computeMetrics()) {
@@ -339,35 +387,39 @@ class _CliporaMarkPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 12
-      ..color = const Color(0xFFA855F7).withOpacity(.55 * triProgress)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15);
+      ..strokeWidth = size.shortestSide * .06
+      ..color = const Color(0xFFFF0050).withOpacity(.38 * triProgress)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.shortestSide * .07);
     canvas.drawPath(metricPath, triGlow);
 
-    final triFill = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF22D3EE), Color(0xFF2563EB), Color(0xFFA855F7)],
-      ).createShader(triPath.getBounds());
-    if (triProgress >= .98) canvas.drawPath(triPath, triFill);
+    if (triProgress >= .98) {
+      final triFill = Paint()
+        ..style = PaintingStyle.fill
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF00F2EA), Color(0xFF1877F2), Color(0xFFD62976), Color(0xFFFFFC00)],
+        ).createShader(triPath.getBounds());
+      canvas.drawPath(triPath, triFill);
+    }
 
     final triStroke = Paint()
       ..style = PaintingStyle.stroke
       ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 5
-      ..color = Colors.white.withOpacity(.40 * triProgress);
+      ..strokeWidth = size.shortestSide * .025
+      ..color = Colors.white.withOpacity(.48 * triProgress);
     canvas.drawPath(metricPath, triStroke);
   }
 
   @override
-  bool shouldRepaint(covariant _CliporaMarkPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _SocialCliporaLogoPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.showWordmark != showWordmark;
 }
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -378,10 +430,6 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the navigation bar as an overlay instead of using Scaffold.bottomNavigationBar.
-    // On Samsung/Android hybrid-composition devices this prevents the page body from
-    // being measured short above the floating nav, so the neon background reaches
-    // the real bottom of the screen and scrolling content can pass behind the nav.
     return Scaffold(
       backgroundColor: const Color(0xFF020716),
       resizeToAvoidBottomInset: false,
@@ -392,31 +440,30 @@ class _HomeShellState extends State<HomeShell> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xD6061430), Color(0xF7020716), Color(0xFF020716)],
-                ),
-                border: Border(top: BorderSide(color: Colors.white.withOpacity(.09))),
-                boxShadow: const [BoxShadow(blurRadius: 26, spreadRadius: -12, offset: Offset(0, -8), color: Color(0xAA00D4FF))],
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
-                  child: NavigationBar(
-                    backgroundColor: Colors.transparent,
-                    selectedIndex: index,
-                    onDestinationSelected: (i) => setState(() => index = i),
-                    destinations: const [
-                      NavigationDestination(icon: Icon(Icons.auto_awesome_rounded), selectedIcon: Icon(Icons.rocket_launch_rounded), label: 'Home'),
-                      NavigationDestination(icon: Icon(Icons.grid_view_rounded), selectedIcon: Icon(Icons.video_library_rounded), label: 'Library'),
-                      NavigationDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.verified_user_rounded), label: 'Access'),
-                      NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.bolt_rounded), label: 'Settings'),
-                    ],
+            child: SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(26),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xF20B1630), Color(0xEE111827), Color(0xF2071025)],
                   ),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: const [BoxShadow(blurRadius: 26, offset: Offset(0, 10), color: Color(0x77000000))],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: NavigationBar(
+                  selectedIndex: index,
+                  onDestinationSelected: (value) => setState(() => index = value),
+                  destinations: const [
+                    NavigationDestination(icon: Icon(Icons.download_rounded), selectedIcon: Icon(Icons.flash_on_rounded), label: 'Save'),
+                    NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library_rounded), label: 'Library'),
+                    NavigationDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.verified_user_rounded), label: 'Access'),
+                    NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.bolt_rounded), label: 'Settings'),
+                  ],
                 ),
               ),
             ),
