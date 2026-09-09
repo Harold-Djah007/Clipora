@@ -21,16 +21,15 @@ class CliporaRopeLogo extends StatelessWidget {
       painter: CliporaRopeLogoPainter(progress: progress.clamp(0.0, 1.0).toDouble()),
     );
     if (!showGlow) return child;
-
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * .24),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF00F2EA).withOpacity(.18), blurRadius: size * .28),
-          BoxShadow(color: const Color(0xFFFF2BD6).withOpacity(.18), blurRadius: size * .34),
-          BoxShadow(color: const Color(0xFFFFB000).withOpacity(.10), blurRadius: size * .42),
+          BoxShadow(color: const Color(0xFF00F2EA).withOpacity(.18), blurRadius: size * .30),
+          BoxShadow(color: const Color(0xFFFF2BD6).withOpacity(.18), blurRadius: size * .36),
+          BoxShadow(color: const Color(0xFFFFB000).withOpacity(.10), blurRadius: size * .44),
         ],
       ),
       child: child,
@@ -52,13 +51,13 @@ class CliporaRopeLaunchAnimation extends StatelessWidget {
         final p = Curves.easeInOutCubic.transform(raw);
         final logoProgress = ((p - .26) / .58).clamp(0.0, 1.0).toDouble();
         final settle = Curves.easeOutBack.transform(((p - .64) / .30).clamp(0.0, 1.0).toDouble());
+        final scale = .82 + (.18 * settle.clamp(0.0, 1.05).toDouble());
         final textOpacity = ((p - .72) / .20).clamp(0.0, 1.0).toDouble();
-        final scale = .82 + (.18 * settle.clamp(0.0, 1.05));
 
         return Stack(
           fit: StackFit.expand,
           children: [
-            CustomPaint(painter: _RopeFinaleBackgroundPainter(progress: p)),
+            CustomPaint(painter: _RopeBackgroundPainter(progress: p)),
             CustomPaint(painter: _RopeInflowPainter(progress: p)),
             Center(
               child: Transform.scale(
@@ -66,24 +65,15 @@ class CliporaRopeLaunchAnimation extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(
-                      width: 176,
-                      height: 176,
-                      child: CliporaRopeLogo(size: 176, progress: logoProgress),
-                    ),
+                    SizedBox(width: 176, height: 176, child: CliporaRopeLogo(size: 176, progress: logoProgress)),
                     const SizedBox(height: 24),
                     Opacity(
                       opacity: textOpacity,
-                      child: Column(
-                        children: const [
+                      child: const Column(
+                        children: [
                           Text(
                             'Clipora',
-                            style: TextStyle(
-                              fontSize: 38,
-                              height: 1,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -1.35,
-                            ),
+                            style: TextStyle(fontSize: 38, height: 1, fontWeight: FontWeight.w900, letterSpacing: -1.35),
                           ),
                           SizedBox(height: 8),
                           Text(
@@ -114,7 +104,7 @@ class CliporaRopeLogoPainter extends CustomPainter {
 
   const CliporaRopeLogoPainter({this.progress = 1});
 
-  static const _ropeColors = <Color>[
+  static const _colors = <Color>[
     Color(0xFF00F2EA),
     Color(0xFF1877F2),
     Color(0xFFFFFFFF),
@@ -129,35 +119,38 @@ class CliporaRopeLogoPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final shortest = size.shortestSide;
     final center = size.center(Offset.zero);
-    final rrect = RRect.fromRectAndRadius(
+    final tile = RRect.fromRectAndRadius(
       Rect.fromCenter(center: center, width: shortest * .92, height: shortest * .92),
       Radius.circular(shortest * .23),
     );
-    final bg = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF041120), Color(0xFF0B0D1A), Color(0xFF1A0730)],
-      ).createShader(rrect.outerRect);
-    canvas.drawRRect(rrect, bg);
     canvas.drawRRect(
-      rrect,
+      tile,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF041120), Color(0xFF0B0D1A), Color(0xFF1A0730)],
+        ).createShader(tile.outerRect),
+    );
+    canvas.drawRRect(
+      tile,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = shortest * .018
         ..shader = const LinearGradient(
           colors: [Color(0xFF00F2EA), Color(0xFF1877F2), Color(0xFFFF2BD6), Color(0xFFFFB000)],
-        ).createShader(rrect.outerRect),
+        ).createShader(tile.outerRect),
     );
 
+    final p = progress.clamp(0.0, 1.0).toDouble();
     final arcRect = Rect.fromCircle(center: center.translate(-shortest * .01, -shortest * .02), radius: shortest * .285);
-    final sweep = math.pi * 1.68 * progress.clamp(0.0, 1.0);
     final start = math.pi * .58;
+    final sweep = math.pi * 1.68 * p;
     if (sweep <= 0) return;
 
-    final shadowPath = Path()..addArc(arcRect.inflate(shortest * .012), start, sweep);
+    final shadow = Path()..addArc(arcRect.inflate(shortest * .012), start, sweep);
     canvas.drawPath(
-      shadowPath,
+      shadow,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
@@ -167,21 +160,13 @@ class CliporaRopeLogoPainter extends CustomPainter {
     );
 
     final width = shortest * .052;
-    for (var i = 0; i < _ropeColors.length; i++) {
-      final laneOffset = (i - (_ropeColors.length - 1) / 2) * width * .38;
-      final path = Path()..addArc(arcRect.inflate(laneOffset), start + i * .042, math.max(0, sweep - i * .018));
-      _RopePainter.drawRope(
-        canvas,
-        path,
-        _ropeColors[i],
-        strokeWidth: width,
-        opacity: .95,
-        fiberOpacity: .34,
-        fiberSpacing: shortest * .052,
-      );
+    for (var i = 0; i < _colors.length; i++) {
+      final lane = (i - (_colors.length - 1) / 2) * width * .38;
+      final path = Path()..addArc(arcRect.inflate(lane), start + i * .042, math.max(0, sweep - i * .018));
+      _RopeStroke.draw(canvas, path, _colors[i], strokeWidth: width, opacity: .95, fiberOpacity: .34, fiberSpacing: shortest * .052);
     }
 
-    final triProgress = ((progress - .76) / .20).clamp(0.0, 1.0).toDouble();
+    final triProgress = ((p - .76) / .20).clamp(0.0, 1.0).toDouble();
     if (triProgress <= 0) return;
     final tri = Path()
       ..moveTo(center.dx - shortest * .025, center.dy - shortest * .092)
@@ -191,9 +176,7 @@ class CliporaRopeLogoPainter extends CustomPainter {
     canvas.drawPath(
       tri,
       Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0xFFFFFFFF), Color(0xFF00F2EA), Color(0xFFFFD21E)],
-        ).createShader(tri.getBounds())
+        ..shader = const LinearGradient(colors: [Color(0xFFFFFFFF), Color(0xFF00F2EA), Color(0xFFFFD21E)]).createShader(tri.getBounds())
         ..color = Colors.white.withOpacity(triProgress),
     );
     canvas.drawPath(
@@ -210,10 +193,10 @@ class CliporaRopeLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CliporaRopeLogoPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
-class _RopeFinaleBackgroundPainter extends CustomPainter {
+class _RopeBackgroundPainter extends CustomPainter {
   final double progress;
 
-  const _RopeFinaleBackgroundPainter({required this.progress});
+  const _RopeBackgroundPainter({required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -227,14 +210,14 @@ class _RopeFinaleBackgroundPainter extends CustomPainter {
           colors: [Color(0xFF111B34), Color(0xFF050812), Color(0xFF02030A)],
         ).createShader(rect),
     );
-
+    final center = size.center(Offset.zero);
     final glow = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22)
-      ..strokeWidth = 1.6;
-    final center = size.center(Offset.zero);
-    for (var i = 0; i < 5; i++) {
+      ..strokeWidth = 1.6
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22);
+    const colors = [Color(0xFF00F2EA), Color(0xFFFF0050), Color(0xFF1877F2), Color(0xFFFFD21E), Color(0xFFB026FF)];
+    for (var i = 0; i < colors.length; i++) {
       final a = progress * math.pi * 2 + i * math.pi * .42;
       final r = size.shortestSide * (.28 + i * .06);
       final path = Path()
@@ -245,19 +228,13 @@ class _RopeFinaleBackgroundPainter extends CustomPainter {
           center.dx + math.cos(a + 1.8) * r,
           center.dy + math.sin(a + 1.8) * r,
         );
-      glow.color = [
-        const Color(0xFF00F2EA),
-        const Color(0xFFFF0050),
-        const Color(0xFF1877F2),
-        const Color(0xFFFFD21E),
-        const Color(0xFFB026FF),
-      ][i].withOpacity(.16);
+      glow.color = colors[i].withOpacity(.16);
       canvas.drawPath(path, glow);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _RopeFinaleBackgroundPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _RopeBackgroundPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
 class _RopeInflowPainter extends CustomPainter {
@@ -287,23 +264,11 @@ class _RopeInflowPainter extends CustomPainter {
       final local = ((progress - spec.delay) / .68).clamp(0.0, 1.0).toDouble();
       if (local <= 0) continue;
       final eased = Curves.easeInOutCubic.transform(local);
-      final start = Offset(
-        center.dx + math.cos(spec.startAngle) * reach,
-        center.dy + math.sin(spec.startAngle) * reach,
-      );
+      final start = Offset(center.dx + math.cos(spec.startAngle) * reach, center.dy + math.sin(spec.startAngle) * reach);
       final finishAngle = math.pi * .58 + spec.finishBias;
-      final end = Offset(
-        center.dx + math.cos(finishAngle) * cRadius,
-        center.dy + math.sin(finishAngle) * cRadius,
-      );
-      final control1 = Offset(
-        center.dx + math.cos(spec.startAngle + 1.15) * reach * .45,
-        center.dy + math.sin(spec.startAngle + 1.15) * reach * .45,
-      );
-      final control2 = Offset(
-        center.dx + math.cos(finishAngle - 1.35) * cRadius * 2.8,
-        center.dy + math.sin(finishAngle - 1.35) * cRadius * 2.8,
-      );
+      final end = Offset(center.dx + math.cos(finishAngle) * cRadius, center.dy + math.sin(finishAngle) * cRadius);
+      final control1 = Offset(center.dx + math.cos(spec.startAngle + 1.15) * reach * .45, center.dy + math.sin(spec.startAngle + 1.15) * reach * .45);
+      final control2 = Offset(center.dx + math.cos(finishAngle - 1.35) * cRadius * 2.8, center.dy + math.sin(finishAngle - 1.35) * cRadius * 2.8);
       final path = Path()
         ..moveTo(start.dx, start.dy)
         ..cubicTo(control1.dx, control1.dy, control2.dx, control2.dy, end.dx, end.dy);
@@ -317,15 +282,7 @@ class _RopeInflowPainter extends CustomPainter {
       final fadeOut = progress > .82 ? (1 - ((progress - .82) / .18)).clamp(0.0, 1.0).toDouble() : 1.0;
       final opacity = (.30 + .70 * local) * fadeOut;
 
-      _RopePainter.drawRope(
-        canvas,
-        segment,
-        spec.color,
-        strokeWidth: 8.5,
-        opacity: opacity,
-        fiberOpacity: .42,
-        fiberSpacing: 15,
-      );
+      _RopeStroke.draw(canvas, segment, spec.color, strokeWidth: 8.5, opacity: opacity, fiberOpacity: .42, fiberSpacing: 15);
 
       final tangent = metric.getTangentForOffset(head);
       if (tangent != null && fadeOut > 0) {
@@ -344,8 +301,8 @@ class _RopeInflowPainter extends CustomPainter {
   bool shouldRepaint(covariant _RopeInflowPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
-class _RopePainter {
-  static void drawRope(
+class _RopeStroke {
+  static void draw(
     Canvas canvas,
     Path path,
     Color color, {
@@ -355,7 +312,6 @@ class _RopePainter {
     required double fiberSpacing,
   }) {
     if (opacity <= 0) return;
-
     canvas.drawPath(
       path,
       Paint()
@@ -385,13 +341,12 @@ class _RopePainter {
         ..color = Colors.white.withOpacity(.38 * opacity),
     );
 
-    final metrics = path.computeMetrics().toList(growable: false);
     final fiberPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = math.max(1.0, strokeWidth * .16)
       ..color = Colors.white.withOpacity(fiberOpacity * opacity);
-    for (final metric in metrics) {
+    for (final metric in path.computeMetrics()) {
       for (var d = 0.0; d < metric.length; d += fiberSpacing) {
         final tangent = metric.getTangentForOffset(d);
         if (tangent == null) continue;
@@ -402,11 +357,7 @@ class _RopePainter {
         final normal = Offset(-dir.dy, dir.dx);
         final half = strokeWidth * .42;
         final skew = strokeWidth * .18;
-        canvas.drawLine(
-          tangent.position - normal * half + dir * skew,
-          tangent.position + normal * half - dir * skew,
-          fiberPaint,
-        );
+        canvas.drawLine(tangent.position - normal * half + dir * skew, tangent.position + normal * half - dir * skew, fiberPaint);
       }
     }
   }
