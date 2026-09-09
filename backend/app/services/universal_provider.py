@@ -103,11 +103,7 @@ class UniversalProvider:
 
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, self._extract_info, url)
-        media = self._extract_media_items(info)
-        if not media:
-            # Additive fallback: download HLS/DASH to a local MP4 and let the phone
-            # fetch /api/files/{token}. Direct-MP4 posts never enter this path.
-            media = await loop.run_in_executor(None, self._download_to_cache, url, info)
+        media = await loop.run_in_executor(None, self._collect_all_media, url, info)
         if not media:
             raise ValueError("No downloadable MP4/image media found for this link.")
 
@@ -130,13 +126,41 @@ class UniversalProvider:
     def _extract_info(self, url: str) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:  # type: ignore[union-attr]
             info = ydl.extract_info(url, download=False)
-            if isinstance(info, dict) and "entries" in info and info["entries"]:
-                first = next((entry for entry in info["entries"] if entry), None)
-                if first:
-                    return first
             if not isinstance(info, dict):
                 raise ValueError("yt-dlp returned an unsupported response.")
             return info
+
+    def _post_entries(self, info: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = info.get("entries")
+        if isinstance(raw, list):
+            entries = [entry for entry in raw if isinstance(entry, dict)]
+            if entries:
+                return entries[:20]
+        return [info]
+
+    def _collect_all_media(self, url: str, info: dict[str, Any]) -> list[UniversalMedia]:
+        """Keep one best file per carousel/entry so multi-video posts save every clip."""
+        collected: list[UniversalMedia] = []
+        seen: set[str] = set()
+        for entry in self._post_entries(info):
+            items = self._extract_media_items(entry)
+            if not items:
+                formats = [fmt for fmt in entry.get("formats") or [] if isinstance(fmt, dict)]
+                if self._has_video_like_format(entry, formats):
+                    entry_url = entry.get("webpage_url") or entry.get("original_url") or url
+                    if isinstance(entry_url, str) and entry_url.startswith(("http://", "https://")):
+                        try:
+                            items = self._download_to_cache(entry_url, entry)
+                        except Exception:
+                            items = []
+            for item in items:
+                if item.url in seen:
+                    continue
+                seen.add(item.url)
+                collected.append(item)
+            if len(collected) >= 20:
+                break
+        return collected
 
     def _extract_media_items(self, info: dict[str, Any]) -> list[UniversalMedia]:
         direct_url = info.get("url")
@@ -214,7 +238,9 @@ class UniversalProvider:
             ) from exc
 
         if isinstance(downloaded, dict) and downloaded.get("entries"):
-            downloaded = next((entry for entry in downloaded["entries"] if entry), downloaded)
+            first = next((entry for entry in downloaded["entries"] if entry), None)
+            if isinstance(first, dict):
+                downloaded = first
 
         path = self._find_downloaded_file(cache_dir, token)
         if path is None:

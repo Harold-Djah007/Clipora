@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.6 Rope launch, all post media, clear-on-save
+- Launch animation: colored twisted rope threads flow together, then land on the 3D Clipora C + play mark.
+- In-app mark and Android launcher now use that same 3D rope logo.
+- Multi-video/carousel posts keep every clip instead of only the first one (capped at 20).
+- After at least one file saves, the pasted link is cleared so the same clipboard URL is not reused.
+
 ## 0.8.5 Phone-ready universal saver
 - Added a Resolver URL setting with a backend health check for LAN and USB testing.
 - Bound the Windows start script to `0.0.0.0` and printed the PC LAN address for phone tests.

@@ -28,9 +28,15 @@ class _ThreadVaultMarkState extends State<ThreadVaultMark> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final mark = CustomPaint(
-      size: Size.square(widget.size),
-      painter: const _CliporaMarkPainter(),
+    final mark = ClipRRect(
+      borderRadius: BorderRadius.circular(widget.size * .24),
+      child: Image.asset(
+        'assets/brand/clipora_mark_3d.png',
+        width: widget.size,
+        height: widget.size,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+      ),
     );
     if (!widget.showGlow) return mark;
 
@@ -60,55 +66,4 @@ class _ThreadVaultMarkState extends State<ThreadVaultMark> with SingleTickerProv
       },
     );
   }
-}
-
-class _CliporaMarkPainter extends CustomPainter {
-  const _CliporaMarkPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final tile = RRect.fromRectAndRadius(
-      Rect.fromCircle(center: center, radius: size.shortestSide * .46),
-      Radius.circular(size.shortestSide * .24),
-    );
-    canvas.drawRRect(tile, Paint()..color = const Color(0xFF07111F));
-    canvas.drawRRect(
-      tile,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = size.shortestSide * .02
-        ..color = Colors.white.withOpacity(.10),
-    );
-
-    final arc = Rect.fromCircle(center: center, radius: size.shortestSide * .27);
-    const ribbons = <Color>[
-      Color(0xFF00F2EA),
-      Color(0xFFFF0050),
-      Color(0xFF1877F2),
-    ];
-    for (var i = 0; i < ribbons.length; i++) {
-      canvas.drawArc(
-        arc.inflate(i * size.shortestSide * .012),
-        math.pi * .58,
-        math.pi * 1.68,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeCap = StrokeCap.round
-          ..strokeWidth = size.shortestSide * (.11 - i * .018)
-          ..color = ribbons[i].withOpacity(.92 - i * .12),
-      );
-    }
-
-    final tri = Path()
-      ..moveTo(center.dx - size.width * .02, center.dy - size.height * .10)
-      ..lineTo(center.dx - size.width * .02, center.dy + size.height * .10)
-      ..lineTo(center.dx + size.width * .13, center.dy)
-      ..close();
-    canvas.drawPath(tri, Paint()..color = Colors.white);
-  }
-
-  @override
-  bool shouldRepaint(covariant _CliporaMarkPainter oldDelegate) => false;
 }
