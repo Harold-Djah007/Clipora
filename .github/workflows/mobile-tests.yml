@@ -1,0 +1,33 @@
+name: Mobile Flutter tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'cursor/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  mobile-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+      - name: Flutter doctor
+        run: flutter doctor -v
+      - name: Install mobile dependencies
+        run: flutter pub get
+      - name: Run mobile tests
+        run: flutter test
+      - name: Build debug APK
+        run: flutter build apk --debug --no-pub
