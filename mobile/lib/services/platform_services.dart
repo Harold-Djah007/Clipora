@@ -47,6 +47,20 @@ class PlatformServices {
     } catch (_) {}
   }
 
+  static Future<void> showDownloadComplete({
+    String title = 'Clipora',
+    required String message,
+    required bool success,
+  }) async {
+    try {
+      await _channel.invokeMethod<void>('showDownloadComplete', {
+        'title': title,
+        'message': message,
+        'success': success,
+      });
+    } catch (_) {}
+  }
+
   static Future<void> stopDownloadService() async {
     try {
       await _channel.invokeMethod<void>('stopDownloadService');
