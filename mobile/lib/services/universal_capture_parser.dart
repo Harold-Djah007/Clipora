@@ -25,9 +25,7 @@ class UniversalCaptureParser {
 
     if (!media.any((item) => item.kind == MediaKind.video)) {
       if (videoHint) {
-        throw FormatException(
-          '${platform.label} opened, but the page only exposed a poster image so far. Play the video once in Field Mode, then tap Save again.',
-        );
+        throw FormatException(_posterOnlyMessage(platform));
       }
       _extractImages(normalized, media);
     }
@@ -67,9 +65,7 @@ class UniversalCaptureParser {
     }
     values = values.take(maxCapturedMedia).toList(growable: false);
     if (values.isEmpty) {
-      throw FormatException(
-        'No real ${platform.label} media was found in Field Mode. Open the post, wait for it to load, play the video once, then tap Save again.',
-      );
+      throw FormatException(_noRealMediaMessage(platform));
     }
 
     return ResolvedPost(
@@ -142,7 +138,7 @@ class UniversalCaptureParser {
 
   void _extractDirectVideos(String source, List<ResolvedMedia> out) {
     final patterns = [
-      RegExp(r'"(?:video_url|playable_url|playback_url|src)"\s*:\s*"([^"]+)"', caseSensitive: false),
+      RegExp(r'"(?:video_url|playable_url|playback_url|contentUrl|src)"\s*:\s*"([^"]+)"', caseSensitive: false),
       RegExp(r'"(?:video_url|playable_url|src)"\s*:\s*"([^"]+\.mp4[^"]*)"', caseSensitive: false),
       RegExp(r'''https?:\\?/\\?/[^"'<>\s]+?\.mp4[^"'<>\s]*''', caseSensitive: false),
       RegExp(r'''https?://[^"'<>\s]+?\.mp4[^"'<>\s]*''', caseSensitive: false),
@@ -160,7 +156,7 @@ class UniversalCaptureParser {
 
   void _extractImages(String source, List<ResolvedMedia> out) {
     final patterns = [
-      RegExp(r'"(?:display_url|image_url|thumbnail_url|og:image)"\s*:?\s*"([^"]+)"', caseSensitive: false),
+      RegExp(r'"(?:display_url|image_url|thumbnail_url|og:image|contentUrl)"\s*:?\s*"([^"]+)"', caseSensitive: false),
       RegExp(r'''https?://[^"'<>\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'<>\s]*)?''', caseSensitive: false),
     ];
     for (final pattern in patterns) {
@@ -183,6 +179,8 @@ class UniversalCaptureParser {
         lower.contains('<video') ||
         lower.contains('.mp4') ||
         lower.contains('/video/') ||
+        lower.contains('video_mp4') ||
+        lower.contains('video/mp4') ||
         lower.contains('mime_type=video') ||
         lower.contains('mime=video');
   }
@@ -199,6 +197,10 @@ class UniversalCaptureParser {
 
   bool _looksLikeVideo(String url) {
     final lower = url.toLowerCase();
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+    final snapVideoCandidate = host.endsWith('sc-cdn.net') &&
+        (lower.contains('/media/') || lower.contains('/video/') || lower.contains('video') || lower.contains('mime=video'));
     return _isHttp(url) &&
         !_looksLikeAudio(lower) &&
         !lower.contains('.m3u8') &&
@@ -207,14 +209,23 @@ class UniversalCaptureParser {
             lower.contains('mime_type=video') ||
             lower.contains('mime=video') ||
             lower.contains('video/mp4') ||
+            lower.contains('video_mp4') ||
             lower.contains('/video/') ||
-            lower.contains('format=mp4'));
+            lower.contains('format=mp4') ||
+            snapVideoCandidate);
   }
 
   bool _looksLikeImage(String url) {
     final lower = url.toLowerCase();
     return _isHttp(url) &&
-        (lower.contains('.jpg') || lower.contains('.jpeg') || lower.contains('.png') || lower.contains('.webp'));
+        (lower.contains('.jpg') ||
+            lower.contains('.jpeg') ||
+            lower.contains('.png') ||
+            lower.contains('.webp') ||
+            lower.contains('mime=image') ||
+            lower.contains('image/jpeg') ||
+            lower.contains('image/webp') ||
+            lower.contains('image/png'));
   }
 
   bool _looksLikeAudio(String lower) {
@@ -261,6 +272,20 @@ class UniversalCaptureParser {
     final path = uri.path;
     if (path.isNotEmpty && path != '/') return '${kind.name}:$host$path';
     return '${kind.name}:$url';
+  }
+
+  String _posterOnlyMessage(PlatformMatch platform) {
+    if (platform.label.toLowerCase().contains('snapchat')) {
+      return 'Snapchat opened, but its web player hid the real video and exposed only a poster so far. Open it once in Access, let the story/video play, then tap Save again.';
+    }
+    return '${platform.label} opened, but the page only exposed a poster image so far. Open it once in Access, let the video play, then tap Save again.';
+  }
+
+  String _noRealMediaMessage(PlatformMatch platform) {
+    if (platform.label.toLowerCase().contains('snapchat')) {
+      return 'No real Snapchat media was found in Field Mode. Open the story/video in Access, wait until it plays, then tap Save again.';
+    }
+    return 'No real ${platform.label} media was found in Field Mode. Open the post, wait for it to load, play the video once, then tap Save again.';
   }
 
   String? _extractCaption(String source) {
@@ -316,8 +341,8 @@ class UniversalCaptureParser {
 
   String _imageMime(String url) {
     final lower = url.toLowerCase();
-    if (lower.contains('.png')) return 'image/png';
-    if (lower.contains('.webp')) return 'image/webp';
+    if (lower.contains('.png') || lower.contains('image/png')) return 'image/png';
+    if (lower.contains('.webp') || lower.contains('image/webp')) return 'image/webp';
     return 'image/jpeg';
   }
 
