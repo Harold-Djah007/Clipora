@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+/// Clipora mark used across the app. Keep this widget name so screens do not need to change.
 class ThreadVaultMark extends StatefulWidget {
   final double size;
   final bool showGlow;
@@ -16,7 +17,7 @@ class _ThreadVaultMarkState extends State<ThreadVaultMark> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 3200))..repeat();
   }
 
   @override
@@ -27,14 +28,10 @@ class _ThreadVaultMarkState extends State<ThreadVaultMark> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final mark = Image.asset(
-      'assets/brand/clipora_mark.png',
-      width: widget.size,
-      height: widget.size,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
+    final mark = CustomPaint(
+      size: Size.square(widget.size),
+      painter: const _CliporaMarkPainter(),
     );
-
     if (!widget.showGlow) return mark;
 
     return AnimatedBuilder(
@@ -42,30 +39,76 @@ class _ThreadVaultMarkState extends State<ThreadVaultMark> with SingleTickerProv
       child: mark,
       builder: (context, child) {
         final wave = .5 + (.5 * math.sin(_controller.value * math.pi * 2));
-        return Transform.scale(
-          scale: 1 + (wave * .026),
-          child: Container(
-            width: widget.size,
-            height: widget.size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF00E5FF).withOpacity(.24 + (wave * .18)),
-                  blurRadius: widget.size * (.34 + (wave * .20)),
-                  spreadRadius: widget.size * (.02 + (wave * .03)),
-                ),
-                BoxShadow(
-                  color: const Color(0xFF8B5CF6).withOpacity(.20 + (wave * .14)),
-                  blurRadius: widget.size * (.54 + (wave * .22)),
-                  spreadRadius: widget.size * .02,
-                ),
-              ],
-            ),
-            child: child,
+        return Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.size * .24),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF00F2EA).withOpacity(.16 + wave * .10),
+                blurRadius: widget.size * .36,
+              ),
+              BoxShadow(
+                color: const Color(0xFFFF0050).withOpacity(.10 + wave * .08),
+                blurRadius: widget.size * .50,
+              ),
+            ],
           ),
+          child: child,
         );
       },
     );
   }
+}
+
+class _CliporaMarkPainter extends CustomPainter {
+  const _CliporaMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final tile = RRect.fromRectAndRadius(
+      Rect.fromCircle(center: center, radius: size.shortestSide * .46),
+      Radius.circular(size.shortestSide * .24),
+    );
+    canvas.drawRRect(tile, Paint()..color = const Color(0xFF07111F));
+    canvas.drawRRect(
+      tile,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.shortestSide * .02
+        ..color = Colors.white.withOpacity(.10),
+    );
+
+    final arc = Rect.fromCircle(center: center, radius: size.shortestSide * .27);
+    const ribbons = <Color>[
+      Color(0xFF00F2EA),
+      Color(0xFFFF0050),
+      Color(0xFF1877F2),
+    ];
+    for (var i = 0; i < ribbons.length; i++) {
+      canvas.drawArc(
+        arc.inflate(i * size.shortestSide * .012),
+        math.pi * .58,
+        math.pi * 1.68,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = size.shortestSide * (.11 - i * .018)
+          ..color = ribbons[i].withOpacity(.92 - i * .12),
+      );
+    }
+
+    final tri = Path()
+      ..moveTo(center.dx - size.width * .02, center.dy - size.height * .10)
+      ..lineTo(center.dx - size.width * .02, center.dy + size.height * .10)
+      ..lineTo(center.dx + size.width * .13, center.dy)
+      ..close();
+    canvas.drawPath(tri, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CliporaMarkPainter oldDelegate) => false;
 }

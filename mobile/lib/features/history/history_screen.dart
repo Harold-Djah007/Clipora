@@ -22,7 +22,7 @@ class HistoryScreen extends StatelessWidget {
       child: Column(children: [
         CliporaSectionTitle(
           title: 'Library',
-          subtitle: 'Everything Clipora saved for you',
+          subtitle: 'Files Clipora saved on this device',
           trailing: state.history.isNotEmpty
               ? IconButton(
                   tooltip: 'Clear history',
@@ -54,9 +54,9 @@ class HistoryScreen extends StatelessWidget {
                     child: Column(mainAxisSize: MainAxisSize.min, children: const [
                       Icon(Icons.grid_view_rounded, size: 44, color: Color(0xFF67E8F9)),
                       SizedBox(height: 12),
-                      Text('Your Clipora library is empty', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
+                      Text('Nothing saved yet', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
                       SizedBox(height: 6),
-                      Text('Saved videos, photos, carousels and failed jobs will appear here.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                      Text('Saved videos and photos will show up here.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
                     ]),
                   ),
                 )
@@ -99,26 +99,20 @@ class _HistoryTile extends StatelessWidget {
       padding: const EdgeInsets.all(13),
       child: Row(children: [
         Container(
-          width: 62,
-          height: 62,
+          width: 48,
+          height: 48,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isVideo
-                  ? const [Color(0xFF2563EB), Color(0xFF7C3AED)]
-                  : const [Color(0xFF0891B2), Color(0xFF2563EB)],
-            ),
+            color: Colors.white.withOpacity(.05),
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(isVideo ? Icons.play_arrow_rounded : Icons.image_rounded, size: 34, color: Colors.white),
+          child: Icon(isVideo ? Icons.play_arrow_rounded : Icons.image_outlined, size: 22, color: Colors.white70),
         ),
         const SizedBox(width: 13),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(
-                child: Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900)),
+                child: Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

@@ -1,7 +1,7 @@
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, HttpUrl
 
-MediaType = Literal["video", "image"]
+MediaType = Literal["video", "image", "audio"]
 
 class DownloadRequest(BaseModel):
     urls: List[HttpUrl] = Field(min_length=1, max_length=50)
@@ -16,6 +16,10 @@ class MediaItem(BaseModel):
     caption: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    platform: str = "threads"
+    source_page_url: Optional[str] = None
+    filesize: Optional[int] = None
+    quality: Optional[str] = None
 
 class DownloadJob(BaseModel):
     id: str

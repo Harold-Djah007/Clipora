@@ -7,7 +7,6 @@ import 'features/downloads/downloads_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/session/session_screen.dart';
 import 'features/settings/settings_screen.dart';
-import 'widgets/premium_card.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,15 +18,18 @@ Future<void> main() async {
 class CliporaApp extends StatelessWidget {
   const CliporaApp({super.key});
 
+  static const _cyan = Color(0xFF00F2EA);
+  static const _pink = Color(0xFFFF0050);
+  static const _blue = Color(0xFF1877F2);
+
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF00E5FF);
     final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
+      seedColor: _cyan,
       brightness: Brightness.dark,
-      primary: seed,
-      secondary: const Color(0xFF8B5CF6),
-      tertiary: const Color(0xFF22D3EE),
+      primary: _cyan,
+      secondary: _pink,
+      tertiary: _blue,
       surface: const Color(0xFF0A1024),
     );
 
@@ -37,48 +39,43 @@ class CliporaApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: scheme,
-        scaffoldBackgroundColor: const Color(0xFF020716),
+        scaffoldBackgroundColor: const Color(0xFF07090F),
         fontFamily: 'Roboto',
         textTheme: ThemeData.dark().textTheme.apply(
               bodyColor: Colors.white,
               displayColor: Colors.white,
             ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: false,
-        ),
+        appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0, centerTitle: false),
         navigationBarTheme: NavigationBarThemeData(
           height: 68,
           backgroundColor: Colors.transparent,
           elevation: 0,
-          indicatorColor: const Color(0xFF00E5FF).withOpacity(.16),
+          indicatorColor: _cyan.withOpacity(.12),
           labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
                 fontSize: 11,
-                letterSpacing: -.15,
-                fontWeight: states.contains(WidgetState.selected) ? FontWeight.w900 : FontWeight.w600,
-                color: states.contains(WidgetState.selected) ? const Color(0xFFE0F7FF) : Colors.white70,
+                fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+                color: states.contains(WidgetState.selected) ? Colors.white : Colors.white54,
               )),
           iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
-                size: states.contains(WidgetState.selected) ? 24 : 22,
-                color: states.contains(WidgetState.selected) ? const Color(0xFF67E8F9) : Colors.white70,
+                size: 22,
+                color: states.contains(WidgetState.selected) ? _cyan : Colors.white54,
               )),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xEE0B1630),
+          fillColor: const Color(0xFF161A22),
           hintStyle: const TextStyle(color: Colors.white38),
           labelStyle: const TextStyle(color: Colors.white70),
           helperStyle: const TextStyle(color: Color(0x73FFFFFF)),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: BorderSide(color: Colors.white.withOpacity(.10)),
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(color: Colors.white.withOpacity(.08)),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: const BorderSide(color: Color(0xFF22D3EE), width: 1.5),
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            borderSide: BorderSide(color: Color(0xFF00C2C7), width: 1.2),
           ),
         ),
         filledButtonTheme: FilledButtonThemeData(
@@ -136,7 +133,7 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 2850), () {
+    Timer(const Duration(milliseconds: 2400), () {
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -165,7 +162,7 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2700))..forward();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..forward();
   }
 
   @override
@@ -178,57 +175,44 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF020716),
-      body: Stack(
-        children: [
-          const Positioned.fill(child: CliporaLiveBackground()),
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) => CustomPaint(
-                painter: _CliporaLaunchPainter(progress: Curves.easeInOutCubic.transform(_controller.value)),
+      body: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final p = Curves.easeInOutCubic.transform(_controller.value);
+          final textOpacity = ((p - .62) / .28).clamp(0.0, 1.0).toDouble();
+          final scale = .94 + (.06 * Curves.easeOutCubic.transform(p));
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(painter: _SocialThreadInflowPainter(progress: p)),
               ),
-            ),
-          ),
-          Center(
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                final p = _controller.value;
-                final textOpacity = ((p - .62) / .28).clamp(0.0, 1.0).toDouble();
-                final scale = .94 + (.06 * Curves.easeOutBack.transform(p.clamp(0.0, 1.0).toDouble()));
-                return Transform.scale(
+              Center(
+                child: Transform.scale(
                   scale: scale,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        width: 190,
-                        height: 190,
-                        child: CustomPaint(
-                          painter: _CliporaMarkPainter(progress: Curves.easeInOutCubic.transform(p)),
-                        ),
+                        width: 168,
+                        height: 168,
+                        child: CustomPaint(painter: _CliporaMarkPainter(progress: p)),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 22),
                       Opacity(
                         opacity: textOpacity,
-                        child: Column(
-                          children: const [
+                        child: const Column(
+                          children: [
                             Text(
                               'Clipora',
-                              style: TextStyle(
-                                fontSize: 38,
-                                height: 1,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -1.4,
-                              ),
+                              style: TextStyle(fontSize: 36, height: 1, fontWeight: FontWeight.w900, letterSpacing: -1.2),
                             ),
-                            SizedBox(height: 9),
+                            SizedBox(height: 8),
                             Text(
-                              'fast • private • yours',
+                              'save • share • keep',
                               style: TextStyle(
-                                color: Color(0xB3FFFFFF),
-                                fontSize: 13,
-                                letterSpacing: 3.4,
+                                color: Color(0x99FFFFFF),
+                                fontSize: 12,
+                                letterSpacing: 3.2,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -237,129 +221,137 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _CliporaLaunchPainter extends CustomPainter {
+class _SocialThreadInflowPainter extends CustomPainter {
   final double progress;
-  const _CliporaLaunchPainter({required this.progress});
+  const _SocialThreadInflowPainter({required this.progress});
+
+  static const _threads = <Color>[
+    Color(0xFF00F2EA),
+    Color(0xFFFF0050),
+    Color(0xFF1877F2),
+    Color(0xFFFA7E1E),
+    Color(0xFF962FBF),
+    Color(0xFFFFFC00),
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final p = progress;
-    final glowPaint = Paint()
+    final reach = math.max(size.width, size.height) * .62;
+    final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 3;
+      ..strokeCap = StrokeCap.round;
 
-    for (var i = 0; i < 18; i++) {
-      final phase = (i / 18.0);
-      final travel = ((p * 1.15) - (phase * .42)).clamp(0.0, 1.0).toDouble();
-      final angle = (phase * math.pi * 2.4) + (p * math.pi * 1.2);
-      final startRadius = math.max(size.width, size.height) * (.46 + (.16 * math.sin(i)));
-      final endRadius = 98.0 + (12 * math.sin(i * 2.1));
-      final radius = startRadius + ((endRadius - startRadius) * Curves.easeOutCubic.transform(travel));
-      final pos = Offset(center.dx + math.cos(angle) * radius, center.dy + math.sin(angle) * radius);
-      final tail = Offset(center.dx + math.cos(angle - .11) * (radius + 38), center.dy + math.sin(angle - .11) * (radius + 38));
-      final opacity = ((travel < .04 ? travel / .04 : 1.0).clamp(0.0, 1.0).toDouble() * (1 - (travel > .96 ? (travel - .96) / .04 : 0)).clamp(0.0, 1.0).toDouble());
-      glowPaint.shader = LinearGradient(
-        colors: [
-          Color(0x0000E5FF),
-          Color.lerp(const Color(0xFF00E5FF), const Color(0xFFA855F7), phase)!.withOpacity(.55 * opacity),
-        ],
-      ).createShader(Rect.fromPoints(tail, pos));
-      canvas.drawLine(tail, pos, glowPaint);
-      final dot = Paint()..color = const Color(0xFF67E8F9).withOpacity(.62 * opacity);
-      canvas.drawCircle(pos, 2.2 + (2.4 * (1 - travel)), dot);
+    for (var i = 0; i < _threads.length; i++) {
+      final color = _threads[i];
+      final delay = i * .07;
+      final travel = ((progress - delay) / .72).clamp(0.0, 1.0).toDouble();
+      if (travel <= 0) continue;
+      final eased = Curves.easeInOutCubic.transform(travel);
+      final startAngle = (math.pi * 2 * i / _threads.length) - .35;
+      final start = Offset(
+        center.dx + math.cos(startAngle) * reach,
+        center.dy + math.sin(startAngle) * reach,
+      );
+      final endRadius = 78.0;
+      final end = Offset(
+        center.dx + math.cos(startAngle + 2.4) * endRadius,
+        center.dy + math.sin(startAngle + 2.4) * endRadius,
+      );
+      final control = Offset(
+        center.dx + math.cos(startAngle + 1.1) * (reach * (1 - eased * .55)),
+        center.dy + math.sin(startAngle + 1.1) * (reach * (1 - eased * .55)),
+      );
+      final path = Path()
+        ..moveTo(start.dx, start.dy)
+        ..quadraticBezierTo(control.dx, control.dy, end.dx, end.dy);
+      final metrics = path.computeMetrics().toList();
+      if (metrics.isEmpty) continue;
+      final drawn = metrics.first.extractPath(0, metrics.first.length * eased);
+      final fade = travel < .12 ? travel / .12 : (travel > .88 ? (1 - ((travel - .88) / .12)) : 1.0);
+      paint
+        ..strokeWidth = 3.2
+        ..color = color.withOpacity(.18 * fade)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      canvas.drawPath(drawn, paint);
+      paint
+        ..maskFilter = null
+        ..strokeWidth = 2.4
+        ..color = color.withOpacity(.78 * fade);
+      canvas.drawPath(drawn, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _CliporaLaunchPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _SocialThreadInflowPainter oldDelegate) => oldDelegate.progress != progress;
 }
 
 class _CliporaMarkPainter extends CustomPainter {
   final double progress;
   const _CliporaMarkPainter({required this.progress});
 
+  static const _ribbons = <Color>[
+    Color(0xFF00F2EA),
+    Color(0xFFFF0050),
+    Color(0xFF1877F2),
+  ];
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide * .34;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final cProgress = ((progress - .10) / .58).clamp(0.0, 1.0).toDouble();
-    final triProgress = ((progress - .52) / .32).clamp(0.0, 1.0).toDouble();
-    final shine = (.5 + (.5 * math.sin(progress * math.pi * 2))).clamp(0.0, 1.0).toDouble();
+    final tile = RRect.fromRectAndRadius(
+      Rect.fromCircle(center: center, radius: size.shortestSide * .46),
+      Radius.circular(size.shortestSide * .22),
+    );
+    final tileOpacity = ((progress - .08) / .28).clamp(0.0, 1.0).toDouble();
+    canvas.drawRRect(
+      tile,
+      Paint()..color = const Color(0xFF07111F).withOpacity(.92 * tileOpacity),
+    );
+    canvas.drawRRect(
+      tile,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..color = Colors.white.withOpacity(.10 * tileOpacity),
+    );
 
-    final glow = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .27
-      ..color = const Color(0xFF00E5FF).withOpacity(.18 + (.14 * shine))
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22);
-    canvas.drawArc(rect.inflate(1), math.pi * .62, math.pi * 1.72 * cProgress, false, glow);
+    final arc = Rect.fromCircle(center: center, radius: size.shortestSide * .27);
+    final cProgress = ((progress - .18) / .52).clamp(0.0, 1.0).toDouble();
+    final triProgress = ((progress - .58) / .28).clamp(0.0, 1.0).toDouble();
 
-    final cPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .21
-      ..shader = SweepGradient(
-        startAngle: .4,
-        endAngle: math.pi * 2,
-        colors: const [Color(0xFF7C3AED), Color(0xFF2563EB), Color(0xFF22D3EE), Color(0xFFA855F7), Color(0xFF7C3AED)],
-      ).createShader(rect.inflate(18));
-    canvas.drawArc(rect, math.pi * .62, math.pi * 1.72 * cProgress, false, cPaint);
-
-    final highlight = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.shortestSide * .045
-      ..color = Colors.white.withOpacity(.36 * cProgress);
-    canvas.drawArc(rect.deflate(8), math.pi * 1.15, math.pi * .42 * cProgress, false, highlight);
-
-    final triPath = Path()
-      ..moveTo(center.dx - size.width * .035, center.dy - size.height * .128)
-      ..lineTo(center.dx - size.width * .035, center.dy + size.height * .128)
-      ..lineTo(center.dx + size.width * .16, center.dy)
-      ..close();
-    final metricPath = Path();
-    for (final metric in triPath.computeMetrics()) {
-      metricPath.addPath(metric.extractPath(0, metric.length * triProgress), Offset.zero);
+    for (var i = 0; i < _ribbons.length; i++) {
+      final ribbon = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = size.shortestSide * (.11 - i * .018)
+        ..color = _ribbons[i].withOpacity(.90 - i * .12);
+      canvas.drawArc(arc.inflate(i * size.shortestSide * .012), math.pi * .58, math.pi * 1.68 * cProgress, false, ribbon);
     }
 
-    final triGlow = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 12
-      ..color = const Color(0xFFA855F7).withOpacity(.55 * triProgress)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15);
-    canvas.drawPath(metricPath, triGlow);
-
-    final triFill = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF22D3EE), Color(0xFF2563EB), Color(0xFFA855F7)],
-      ).createShader(triPath.getBounds());
-    if (triProgress >= .98) canvas.drawPath(triPath, triFill);
-
-    final triStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 5
-      ..color = Colors.white.withOpacity(.40 * triProgress);
-    canvas.drawPath(metricPath, triStroke);
+    final tri = Path()
+      ..moveTo(center.dx - size.width * .02, center.dy - size.height * .10)
+      ..lineTo(center.dx - size.width * .02, center.dy + size.height * .10)
+      ..lineTo(center.dx + size.width * .13, center.dy)
+      ..close();
+    if (triProgress > 0) {
+      canvas.drawPath(
+        tri,
+        Paint()
+          ..style = PaintingStyle.fill
+          ..color = Colors.white.withOpacity(.92 * triProgress),
+      );
+    }
   }
 
   @override
@@ -368,6 +360,7 @@ class _CliporaMarkPainter extends CustomPainter {
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -378,12 +371,8 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the navigation bar as an overlay instead of using Scaffold.bottomNavigationBar.
-    // On Samsung/Android hybrid-composition devices this prevents the page body from
-    // being measured short above the floating nav, so the neon background reaches
-    // the real bottom of the screen and scrolling content can pass behind the nav.
     return Scaffold(
-      backgroundColor: const Color(0xFF020716),
+      backgroundColor: const Color(0xFF07090F),
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
@@ -394,29 +383,20 @@ class _HomeShellState extends State<HomeShell> {
             bottom: 0,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xD6061430), Color(0xF7020716), Color(0xFF020716)],
-                ),
-                border: Border(top: BorderSide(color: Colors.white.withOpacity(.09))),
-                boxShadow: const [BoxShadow(blurRadius: 26, spreadRadius: -12, offset: Offset(0, -8), color: Color(0xAA00D4FF))],
+                color: const Color(0xF20B0D12),
+                border: Border(top: BorderSide(color: Colors.white.withOpacity(.08))),
               ),
               child: SafeArea(
                 top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
-                  child: NavigationBar(
-                    backgroundColor: Colors.transparent,
-                    selectedIndex: index,
-                    onDestinationSelected: (i) => setState(() => index = i),
-                    destinations: const [
-                      NavigationDestination(icon: Icon(Icons.auto_awesome_rounded), selectedIcon: Icon(Icons.rocket_launch_rounded), label: 'Home'),
-                      NavigationDestination(icon: Icon(Icons.grid_view_rounded), selectedIcon: Icon(Icons.video_library_rounded), label: 'Library'),
-                      NavigationDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.verified_user_rounded), label: 'Access'),
-                      NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.bolt_rounded), label: 'Settings'),
-                    ],
-                  ),
+                child: NavigationBar(
+                  selectedIndex: index,
+                  onDestinationSelected: (value) => setState(() => index = value),
+                  destinations: const [
+                    NavigationDestination(icon: Icon(Icons.south_west_rounded), selectedIcon: Icon(Icons.download_rounded), label: 'Save'),
+                    NavigationDestination(icon: Icon(Icons.grid_view_outlined), selectedIcon: Icon(Icons.grid_view_rounded), label: 'Library'),
+                    NavigationDestination(icon: Icon(Icons.lock_outline_rounded), selectedIcon: Icon(Icons.lock_rounded), label: 'Access'),
+                    NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings_rounded), label: 'Settings'),
+                  ],
                 ),
               ),
             ),

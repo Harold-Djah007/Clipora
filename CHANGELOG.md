@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.4 Universal Resolver Foundation
+- Added backend platform detection for Threads, TikTok, Instagram, X/Twitter, Pinterest, Facebook, Snapchat public/share links, and YouTube/Shorts.
+- Added `yt-dlp`-powered universal resolver foundation for supported public/share links.
+- Added `/api/detect` and `/api/resolve/universal` endpoints.
+- Updated download jobs to use the universal provider while preserving the existing Threads resolver for compatibility.
+- Extended download items with platform, source page URL, file size, and quality metadata.
+- Added regression tests for platform detection and media candidate selection.
+- Kept the safety boundary: no platform password collection, no private-access bypassing, and no watermark-removal feature.
+
+## 0.8.3
+- Added autopilot Smart Capture that tries to auto-start Threads videos before requiring user interaction.
+- Kept video-poster guard so video posts wait for a real MP4 instead of saving poster JPG.
+
+## 0.8.2
+- Replaced manual Video/Post/Photos choice with Smart Save and automatic Smart Capture.
+
+## 0.8.1
+- Fixed share-link regression where video posts could be saved as image-only poster snapshots.
+
+## 0.8.0
+- Added 10/10 polish pass, faster resolving, default 5 download lanes, and safer media handling.
+
 ## 0.6.0
 - Replaced placeholder mobile shell with a functional local-first download workflow.
 - Added embedded Threads browser resolution for public/private authorized posts.

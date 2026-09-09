@@ -5,7 +5,7 @@ __pycache__/
 .venv/
 .env
 cookies.txt
-downloads/
+/downloads/
 
 # Flutter / Dart
 .dart_tool/
