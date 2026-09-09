@@ -1,3 +1,5 @@
+import asyncio
+
 from app.services.universal_provider import UniversalProvider
 
 
@@ -34,3 +36,62 @@ def test_image_thumbnail_used_only_when_no_video_exists():
     assert len(media) == 1
     assert media[0].media_type == "image"
     assert media[0].url.endswith("large.jpg")
+
+
+def test_resolve_keeps_every_video_entry(monkeypatch):
+    provider = UniversalProvider()
+    info = {
+        "id": "carousel",
+        "uploader": "creator",
+        "entries": [
+            {
+                "id": "one",
+                "webpage_url": "https://x.com/creator/status/1",
+                "formats": [
+                    {"url": "https://cdn.example/clip-a.mp4", "ext": "mp4", "height": 720, "width": 1280, "vcodec": "h264"},
+                ],
+            },
+            {
+                "id": "two",
+                "webpage_url": "https://x.com/creator/status/2",
+                "formats": [
+                    {"url": "https://cdn.example/clip-b.mp4", "ext": "mp4", "height": 1080, "width": 1920, "vcodec": "h264"},
+                ],
+            },
+        ],
+    }
+
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda url, entry, index=1: provider._extract_media_items(entry))
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://x.com/creator/status/carousel"))
+
+    assert [item.url for item in post.media] == [
+        "https://cdn.example/clip-a.mp4",
+        "https://cdn.example/clip-b.mp4",
+    ]
+
+
+def test_resolve_caps_carousel_entries_at_twenty(monkeypatch):
+    provider = UniversalProvider()
+    entries = [
+        {
+            "id": str(index),
+            "webpage_url": f"https://x.com/creator/status/{index}",
+            "formats": [
+                {"url": f"https://cdn.example/clip-{index}.mp4", "ext": "mp4", "height": 720, "width": 1280, "vcodec": "h264"},
+            ],
+        }
+        for index in range(25)
+    ]
+    info = {"id": "big-carousel", "uploader": "creator", "entries": entries}
+
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda url, entry, index=1: provider._extract_media_items(entry))
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://x.com/creator/status/big-carousel"))
+
+    assert len(post.media) == 20
+    assert post.media[0].url.endswith("clip-0.mp4")
+    assert post.media[-1].url.endswith("clip-19.mp4")
+}
