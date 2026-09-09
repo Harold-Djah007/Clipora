@@ -3,6 +3,13 @@ import 'package:threadvault/models/media_models.dart';
 import 'package:threadvault/services/universal_resolver_service.dart';
 
 void main() {
+  test('defaults to field mode when no backend is configured', () {
+    final service = UniversalResolverService();
+
+    expect(service.hasConfiguredBackend, isFalse);
+    expect(service.baseUrls, isEmpty);
+  });
+
   test('converts backend universal resolver JSON into mobile post model', () {
     final post = UniversalResolverService.postFromJson(
       {
