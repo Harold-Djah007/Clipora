@@ -52,7 +52,7 @@ class _LoginBrowser extends StatelessWidget {
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
           decoration: BoxDecoration(
-            color: const Color(0xF20A1024),
+            color: const Color(0xFF0B0D12),
             border: Border(bottom: BorderSide(color: Colors.white.withOpacity(.10))),
           ),
           child: SafeArea(
@@ -61,7 +61,7 @@ class _LoginBrowser extends StatelessWidget {
               IconButton(onPressed: onClose, icon: const Icon(Icons.close_rounded)),
               const ThreadVaultMark(size: 38),
               const SizedBox(width: 10),
-              const Expanded(child: Text('Sign in to Threads', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17))),
+              const Expanded(child: Text('Sign in to Threads', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
               FilledButton.icon(onPressed: onDone, icon: const Icon(Icons.done_rounded), label: const Text('Done')),
             ]),
           ),
@@ -94,8 +94,8 @@ class _AccessHome extends StatelessWidget {
         padding: EdgeInsets.zero,
         children: [
           const CliporaSectionTitle(
-            title: 'Private Access',
-            subtitle: 'Use your own authorized Threads session',
+            title: 'Access',
+            subtitle: 'Sign in to Threads only when a private post needs it',
           ),
           const SizedBox(height: 18),
           CliporaHeroCard(
@@ -103,7 +103,7 @@ class _AccessHome extends StatelessWidget {
               const ThreadVaultMark(size: 96),
               const SizedBox(height: 12),
               Text(
-                state.sessionConnected ? 'Private session ready' : 'Connect once. Save privately.',
+                state.sessionConnected ? 'Session connected' : 'Optional Threads login',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -.6),
               ),
@@ -111,7 +111,7 @@ class _AccessHome extends StatelessWidget {
               Text(
                 state.sessionConnected
                     ? 'Clipora can resolve posts that your connected account is already allowed to view.'
-                    : 'Sign in inside the secure browser. Clipora never asks for or stores your password.',
+                    : 'Clipora never asks for your password. Sign-in happens on Threads.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70, height: 1.35),
               ),
@@ -119,7 +119,7 @@ class _AccessHome extends StatelessWidget {
               CliporaPrimaryButton(
                 onPressed: onConnect,
                 icon: Icon(state.sessionConnected ? Icons.refresh_rounded : Icons.login_rounded, color: Colors.white),
-                label: state.sessionConnected ? 'Reconnect session' : 'Connect Threads',
+                label: state.sessionConnected ? 'Reconnect' : 'Sign in to Threads',
               ),
               if (state.sessionConnected) ...[
                 const SizedBox(height: 10),
@@ -128,7 +128,7 @@ class _AccessHome extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: state.disconnect,
                     icon: const Icon(Icons.delete_forever_rounded),
-                    label: const Text('Delete session now'),
+                    label: const Text('Sign out'),
                   ),
                 ),
               ],
@@ -137,7 +137,7 @@ class _AccessHome extends StatelessWidget {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Privacy rules', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+              Text('Privacy', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               SizedBox(height: 12),
               _PrivacyRow(icon: Icons.password_rounded, text: 'Your password is typed into Threads, not Clipora.'),
               _PrivacyRow(icon: Icons.phone_android_rounded, text: 'Cookies stay in the device WebView session.'),
@@ -148,7 +148,7 @@ class _AccessHome extends StatelessWidget {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Best private capture flow', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+              Text('For private videos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               SizedBox(height: 12),
               _PrivacyRow(icon: Icons.login_rounded, text: 'Log in once from Private Access.'),
               _PrivacyRow(icon: Icons.play_circle_fill_rounded, text: 'When capture opens, play the video once.'),

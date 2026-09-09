@@ -43,7 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const CliporaSectionTitle(
             title: 'Settings',
-            subtitle: 'Tune speed, privacy and saving behavior',
+            subtitle: 'Downloads, filenames, and session privacy',
           ),
           const SizedBox(height: 18),
           CliporaHeroCard(
@@ -52,9 +52,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(width: 16),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-                  Text('Clipora Control', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -.5)),
+                  Text('Clipora', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -.4)),
                   SizedBox(height: 4),
-                  Text('Built for background saving, clean MP4 capture and faster carousels.', style: TextStyle(color: Colors.white70, height: 1.25)),
+                  Text('A quiet saver for links you can already view.', style: TextStyle(color: Colors.white70, height: 1.3)),
                 ]),
               ),
             ]),
@@ -63,11 +63,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           PremiumCard(
             glow: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const _PanelTitle(icon: Icons.bolt_rounded, title: 'Speed Engine', subtitle: 'Parallel downloads for batches and carousels'),
+              const _PanelTitle(icon: Icons.speed_rounded, title: 'Downloads', subtitle: 'How many files to fetch at once'),
               const SizedBox(height: 14),
               Row(children: [
-                Expanded(child: Text('${s.maxConcurrentDownloads} parallel lane${s.maxConcurrentDownloads == 1 ? '' : 's'}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18))),
-                CliporaPill(icon: Icons.speed_rounded, label: s.maxConcurrentDownloads >= 5 ? 'Turbo' : s.maxConcurrentDownloads >= 3 ? 'Balanced' : 'Safe'),
+                Expanded(child: Text('${s.maxConcurrentDownloads} at a time', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
+                CliporaPill(icon: Icons.speed_rounded, label: s.maxConcurrentDownloads >= 5 ? 'Faster' : s.maxConcurrentDownloads >= 3 ? 'Balanced' : 'Gentle'),
               ]),
               Slider(
                 min: 1,
@@ -78,7 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (v) => _update(s.copyWith(maxConcurrentDownloads: v.round())),
               ),
               const Text(
-                'Default is 5 lanes for faster carousels. Use 6 on strong Wi‑Fi; reduce to 3–4 for weak networks.',
+                'Higher values finish carousels sooner. Lower them on a weak connection.',
                 style: TextStyle(color: Colors.white54, height: 1.3),
               ),
               const SizedBox(height: 8),
@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.workspace_premium_rounded, title: 'About Clipora', subtitle: 'Version 0.8.4 • universal-social brand'),
+              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.4'),
               SizedBox(height: 12),
               Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass Threads access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),
@@ -165,17 +165,17 @@ class _PanelTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
-        width: 40,
-        height: 40,
+        width: 36,
+        height: 36,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(15),
-          gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF8B5CF6)]),
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.white.withOpacity(.05),
         ),
-        child: Icon(icon, color: Colors.white, size: 21),
+        child: Icon(icon, color: const Color(0xFF8BE9E0), size: 18),
       ),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         const SizedBox(height: 2),
         Text(subtitle, style: const TextStyle(color: Colors.white60, height: 1.25)),
       ])),
@@ -195,7 +195,7 @@ class _SwitchRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return SwitchListTile.adaptive(
       contentPadding: EdgeInsets.zero,
-      secondary: Icon(icon, color: const Color(0xFF67E8F9)),
+      secondary: Icon(icon, color: const Color(0xFF8BE9E0)),
       value: value,
       onChanged: onChanged,
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
