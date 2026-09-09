@@ -2,7 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:threadvault/services/resolver_url.dart';
 
 void main() {
-  test('allows localhost, emulator, and RFC1918 HTTP resolver URLs', () {
+  test('blank resolver means field mode with no backend candidates', () {
+    expect(ResolverUrl.defaultValue, isEmpty);
+    expect(ResolverUrl.isAllowed(''), isTrue);
+    expect(ResolverUrl.isConfigured(''), isFalse);
+    expect(ResolverUrl.candidates(''), isEmpty);
+  });
+
+  test('allows localhost, emulator, and RFC1918 HTTP resolver URLs when configured', () {
     expect(ResolverUrl.isAllowed('http://127.0.0.1:8010'), isTrue);
     expect(ResolverUrl.isAllowed('http://localhost:8010'), isTrue);
     expect(ResolverUrl.isAllowed('http://10.0.2.2:8010'), isTrue);
@@ -16,7 +23,7 @@ void main() {
     expect(ResolverUrl.isAllowed('ftp://192.168.1.10:8010'), isFalse);
   });
 
-  test('puts the preferred LAN URL first', () {
+  test('puts the preferred LAN URL first when a backend is configured', () {
     final urls = ResolverUrl.candidates('http://192.168.0.20:8010');
     expect(urls.first, 'http://192.168.0.20:8010');
     expect(urls, contains('http://127.0.0.1:8010'));
