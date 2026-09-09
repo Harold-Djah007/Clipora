@@ -1,0 +1,55 @@
+import 'package:flutter/services.dart';
+
+class PlatformServices {
+  static const _channel = MethodChannel('com.threadvault.app/platform');
+
+  static Future<String?> publishDownload({
+    required String sourcePath,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    return _channel.invokeMethod<String>('publishDownload', {
+      'sourcePath': sourcePath,
+      'fileName': fileName,
+      'mimeType': mimeType,
+    });
+  }
+
+  static Future<bool> isOnWifi() async {
+    try {
+      return (await _channel.invokeMethod<bool>('isOnWifi')) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> startDownloadService({
+    String title = 'Clipora',
+    String message = 'Downloading media…',
+  }) async {
+    try {
+      await _channel.invokeMethod<void>('startDownloadService', {
+        'title': title,
+        'message': message,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> updateDownloadService({
+    String title = 'Clipora',
+    required String message,
+  }) async {
+    try {
+      await _channel.invokeMethod<void>('updateDownloadService', {
+        'title': title,
+        'message': message,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> stopDownloadService() async {
+    try {
+      await _channel.invokeMethod<void>('stopDownloadService');
+    } catch (_) {}
+  }
+}

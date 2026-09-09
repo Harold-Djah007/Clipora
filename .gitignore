@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+cookies.txt
+downloads/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/
+
+# Android / Gradle
+.gradle/
+local.properties
+*.jks
+*.keystore
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
