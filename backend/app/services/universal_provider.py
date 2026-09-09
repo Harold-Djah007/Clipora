@@ -104,9 +104,23 @@ class UniversalProvider:
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, self._extract_info, url)
         media = self._extract_media_items(info)
+        video_like = self._has_video_like_format(info, self._formats(info))
+
+        if video_like:
+            # Phone/CDN direct downloads can be rejected with 403 even when yt-dlp can
+            # resolve the link. For universal video saves, make the PC backend fetch
+            # the file first and let the phone download it from /api/files/{token}.
+            # This fixes TikTok signed-CDN failures and keeps Threads on its old guard.
+            try:
+                media = await loop.run_in_executor(None, self._download_to_cache, url, info)
+            except Exception:
+                if not media:
+                    raise
+
         if not media:
             # Additive fallback: download HLS/DASH to a local MP4 and let the phone
-            # fetch /api/files/{token}. Direct-MP4 posts never enter this path.
+            # fetch /api/files/{token}. Direct-MP4 posts normally use the same cache
+            # path above so platform CDNs do not reject the Android downloader.
             media = await loop.run_in_executor(None, self._download_to_cache, url, info)
         if not media:
             raise ValueError("No downloadable MP4/image media found for this link.")
@@ -157,7 +171,7 @@ class UniversalProvider:
         if direct_video:
             return [direct_video]
 
-        formats = [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
+        formats = self._formats(info)
         candidates = [item for item in (self._media_from_format(fmt) for fmt in formats) if item]
         candidates.sort(key=lambda item: ((item.height or 0), (item.filesize or 0)), reverse=True)
         if candidates:
@@ -208,7 +222,7 @@ class UniversalProvider:
                 downloaded = ydl.extract_info(url, download=True)
         except Exception as exc:
             raise ValueError(
-                "No direct MP4 was available, and HLS file fallback failed. "
+                "Clipora resolved the post, but the backend could not prepare the media file. "
                 "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
                 f"Detail: {exc}"
             ) from exc
@@ -252,6 +266,10 @@ class UniversalProvider:
         ranked = mp4 or matches
         ranked.sort(key=lambda path: path.stat().st_size, reverse=True)
         return ranked[0]
+
+    @staticmethod
+    def _formats(info: dict[str, Any]) -> list[dict[str, Any]]:
+        return [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
 
     @staticmethod
     def _has_video_like_format(info: dict[str, Any], formats: list[dict[str, Any]]) -> bool:
