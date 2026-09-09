@@ -46,6 +46,8 @@ class UniversalProvider:
     supported, and keeps Threads on the existing local-session-aware resolver.
     """
 
+    _MAX_PLAYLIST_MEDIA = 20
+
     _ydl_opts: dict[str, Any] = {
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "quiet": True,
@@ -103,30 +105,34 @@ class UniversalProvider:
 
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, self._extract_info, url)
-        media = self._extract_media_items(info)
-        video_like = self._has_video_like_format(info, self._formats(info))
+        platform_info = ensure_supported_platform(url)
+        entries = self._entry_infos(info)
 
-        if video_like:
-            # Phone/CDN direct downloads can be rejected with 403 even when yt-dlp can
-            # resolve the link. For universal video saves, make the PC backend fetch
-            # the file first and let the phone download it from /api/files/{token}.
-            # This fixes TikTok signed-CDN failures and keeps Threads on its old guard.
-            try:
-                media = await loop.run_in_executor(None, self._download_to_cache, url, info)
-            except Exception:
-                if not media:
-                    raise
+        media: list[UniversalMedia] = []
+        for index, entry in enumerate(entries[: self._MAX_PLAYLIST_MEDIA], start=1):
+            entry_url = self._entry_url(entry, url)
+            entry_media = self._extract_media_items(entry)
+            video_like = self._has_video_like_format(entry, self._formats(entry))
 
-        if not media:
-            # Additive fallback: download HLS/DASH to a local MP4 and let the phone
-            # fetch /api/files/{token}. Direct-MP4 posts normally use the same cache
-            # path above so platform CDNs do not reject the Android downloader.
-            media = await loop.run_in_executor(None, self._download_to_cache, url, info)
+            if video_like:
+                # Phone/CDN direct downloads can be rejected with 403 even when yt-dlp
+                # can resolve the link. For universal video saves, make the PC backend
+                # fetch the file first and let the phone download it from /api/files/{token}.
+                try:
+                    entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
+                except Exception:
+                    if not entry_media:
+                        raise
+
+            if not entry_media and video_like:
+                entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
+
+            media.extend(entry_media)
+
         if not media:
             raise ValueError("No downloadable MP4/image media found for this link.")
 
-        platform_info = ensure_supported_platform(url)
-        post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or "clipora"))
+        post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora"))
         author = safe_filename_part(str(info.get("uploader") or info.get("channel") or platform_info.platform.value))
         title = info.get("title") or info.get("fulltitle")
         caption = info.get("description") or title
@@ -138,19 +144,73 @@ class UniversalProvider:
             source_url=url,
             title=title,
             caption=caption,
-            media=media,
+            media=self._dedupe_media(media),
         )
 
     def _extract_info(self, url: str) -> dict[str, Any]:
-        with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:  # type: ignore[union-attr]
+        opts = self._ydl_opts_for(url, allow_playlist=detect_platform(url).platform == Platform.SNAPCHAT)
+        try:
+            return self._extract_info_with_opts(url, opts)
+        except Exception as exc:
+            if not self._should_retry_without_format(exc):
+                raise
+
+            # Some platforms expose photo/story metadata but fail when the MP4-only
+            # format expression is applied. Retry metadata extraction without a
+            # requested format so Pinterest photos, X image posts, and Snapchat story
+            # playlists can still be inspected safely.
+            fallback_opts = dict(opts)
+            fallback_opts.pop("format", None)
+            fallback_opts["skip_download"] = True
+            return self._extract_info_with_opts(url, fallback_opts)
+
+    def _extract_info_with_opts(self, url: str, opts: dict[str, Any]) -> dict[str, Any]:
+        with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
             info = ydl.extract_info(url, download=False)
-            if isinstance(info, dict) and "entries" in info and info["entries"]:
-                first = next((entry for entry in info["entries"] if entry), None)
-                if first:
-                    return first
             if not isinstance(info, dict):
                 raise ValueError("yt-dlp returned an unsupported response.")
             return info
+
+    def _ydl_opts_for(self, url: str, allow_playlist: bool = False) -> dict[str, Any]:
+        opts = dict(self._ydl_opts)
+        if allow_playlist:
+            opts["noplaylist"] = False
+        return opts
+
+    @staticmethod
+    def _should_retry_without_format(error: Exception) -> bool:
+        text = str(error).lower()
+        return (
+            "requested format is not available" in text
+            or "no video could be found" in text
+            or "no video formats found" in text
+        )
+
+    def _entry_infos(self, info: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_entries = info.get("entries")
+        if not isinstance(raw_entries, list) or not raw_entries:
+            return [info]
+
+        entries = [entry for entry in raw_entries if isinstance(entry, dict)]
+        if not entries:
+            return [info]
+        return entries
+
+    @staticmethod
+    def _entry_url(entry: dict[str, Any], fallback: str) -> str:
+        for key in ("webpage_url", "original_url", "url"):
+            value = entry.get(key)
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                return value
+        return fallback
+
+    @staticmethod
+    def _post_id_from_url(url: str) -> Optional[str]:
+        try:
+            parts = [part for part in url.split("?")[0].split("/") if part]
+            return parts[-1] if parts else None
+        except Exception:
+            return None
 
     def _extract_media_items(self, info: dict[str, Any]) -> list[UniversalMedia]:
         direct_url = info.get("url")
@@ -166,6 +226,9 @@ class UniversalProvider:
                 "height": info.get("height"),
                 "filesize": info.get("filesize") or info.get("filesize_approx"),
                 "format_note": info.get("format_note"),
+                "vcodec": info.get("vcodec"),
+                "acodec": info.get("acodec"),
+                "mime_type": info.get("mime_type") or info.get("mimetype"),
             }
         )
         if direct_video:
@@ -177,8 +240,9 @@ class UniversalProvider:
         if candidates:
             return [candidates[0]]
 
-        # If yt-dlp only found HLS/DASH, do not return a poster JPG. The file-fallback
-        # path downloads a real video instead of saving the thumbnail.
+        # If yt-dlp only found HLS/DASH/video-only metadata, do not return a poster
+        # JPG. The file-fallback path downloads a real video instead of saving the
+        # thumbnail.
         if self._has_video_like_format(info, formats):
             return []
 
@@ -201,7 +265,11 @@ class UniversalProvider:
         image_candidates.sort(key=lambda item: ((item.width or 0) * (item.height or 0)), reverse=True)
         return image_candidates[:1]
 
-    def _download_to_cache(self, url: str, info: dict[str, Any]) -> list[UniversalMedia]:
+    @staticmethod
+    def _formats(info: dict[str, Any]) -> list[dict[str, Any]]:
+        return [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
+
+    def _download_to_cache(self, url: str, info: dict[str, Any], index: int = 1) -> list[UniversalMedia]:
         if yt_dlp is None:
             raise RuntimeError("yt-dlp is not installed. Run: pip install -r backend/requirements.txt")
 
@@ -209,7 +277,7 @@ class UniversalProvider:
         cache_dir.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         opts = {
-            **self._ydl_opts,
+            **self._ydl_opts_for(url),
             "skip_download": False,
             "outtmpl": str(cache_dir / f"{token}.%(ext)s"),
             "merge_output_format": "mp4",
@@ -222,7 +290,7 @@ class UniversalProvider:
                 downloaded = ydl.extract_info(url, download=True)
         except Exception as exc:
             raise ValueError(
-                "Clipora resolved the post, but the backend could not prepare the media file. "
+                "No direct MP4 was available, and HLS/direct file fallback failed. "
                 "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
                 f"Detail: {exc}"
             ) from exc
@@ -247,7 +315,7 @@ class UniversalProvider:
                 width=width,
                 height=height,
                 filesize=path.stat().st_size,
-                quality=str(downloaded_info.get("format_note") or self._quality_label(width, height) or "downloaded"),
+                quality=str(downloaded_info.get("format_note") or self._quality_label(width, height) or f"downloaded-{index}"),
             )
         ]
 
@@ -268,10 +336,6 @@ class UniversalProvider:
         return ranked[0]
 
     @staticmethod
-    def _formats(info: dict[str, Any]) -> list[dict[str, Any]]:
-        return [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
-
-    @staticmethod
     def _has_video_like_format(info: dict[str, Any], formats: list[dict[str, Any]]) -> bool:
         samples = list(formats)
         if info.get("url"):
@@ -281,6 +345,9 @@ class UniversalProvider:
                     "ext": info.get("ext"),
                     "protocol": info.get("protocol"),
                     "vcodec": info.get("vcodec"),
+                    "acodec": info.get("acodec"),
+                    "mime_type": info.get("mime_type") or info.get("mimetype"),
+                    "format": info.get("format"),
                 }
             )
         for fmt in samples:
@@ -288,9 +355,20 @@ class UniversalProvider:
             protocol = str(fmt.get("protocol") or "").lower()
             ext = str(fmt.get("ext") or "").lower()
             vcodec = str(fmt.get("vcodec") or "").lower()
-            if vcodec == "none":
+            acodec = str(fmt.get("acodec") or "").lower()
+            mime_type = str(fmt.get("mime_type") or fmt.get("mimetype") or "").lower()
+            label = str(fmt.get("format") or fmt.get("format_note") or "").lower()
+            if vcodec == "none" and acodec != "none":
                 continue
-            if "m3u8" in protocol or url.endswith(".m3u8") or ext in {"mp4", "webm", "mkv", "mov"}:
+            if "m3u8" in protocol or url.endswith(".m3u8"):
+                return True
+            if ext in {"mp4", "webm", "mkv", "mov"}:
+                return True
+            if "video" in mime_type:
+                return True
+            if vcodec not in {"", "none", "unknown"} and url.startswith(("http://", "https://")):
+                return True
+            if "video" in label and url.startswith(("http://", "https://")):
                 return True
         return False
 
@@ -303,14 +381,22 @@ class UniversalProvider:
         protocol = str(fmt.get("protocol") or "").lower()
         vcodec = str(fmt.get("vcodec") or "").lower()
         acodec = str(fmt.get("acodec") or "").lower()
+        mime_type = str(fmt.get("mime_type") or fmt.get("mimetype") or "").lower()
 
-        # Direct mobile downloads still prefer real MP4 files. HLS manifests are
+        # Direct mobile downloads still prefer real files. HLS manifests are
         # skipped here and handled by the file-fallback downloader instead.
         if "m3u8" in protocol or url.endswith(".m3u8"):
             return None
-        if ext != "mp4" and ".mp4" not in url.lower():
-            return None
         if vcodec == "none" and acodec != "none":
+            return None
+
+        looks_video = (
+            ext in {"mp4", "webm", "mkv", "mov"}
+            or ".mp4" in url.lower()
+            or "video" in mime_type
+            or vcodec not in {"", "none", "unknown"}
+        )
+        if not looks_video:
             return None
 
         width = self._int_or_none(fmt.get("width"))
@@ -322,8 +408,16 @@ class UniversalProvider:
             width=width,
             height=height,
             filesize=filesize,
-            quality=str(fmt.get("format_note") or self._quality_label(width, height) or "mp4"),
+            quality=str(fmt.get("format_note") or self._quality_label(width, height) or "video"),
         )
+
+    @staticmethod
+    def _dedupe_media(items: list[UniversalMedia]) -> list[UniversalMedia]:
+        unique: dict[str, UniversalMedia] = {}
+        for item in items:
+            if item.url not in unique:
+                unique[item.url] = item
+        return list(unique.values())
 
     @staticmethod
     def _int_or_none(value: Any) -> Optional[int]:
