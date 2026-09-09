@@ -32,16 +32,18 @@ class ThreadsParser {
     final videoHint = envelope.hasVideoHint || _hasVideoHint(normalized);
 
     // Runtime DOM media is the safest signal because it comes from the actual
-    // post card that loaded in the WebView. But do not stop there: Threads
-    // often exposes a poster image before the MP4/video_versions arrive. The
-    // previous build completed too early and saved that poster as a bad image.
-    // Always scan the scoped HTML for video candidates before accepting images.
+    // post card that loaded in the WebView after the user opens/plays it. If a
+    // runtime video is present, do not also add video_versions from the HTML;
+    // those are usually alternate variants of the same single video and caused
+    // one-video Threads posts to save twice.
     _extractRuntimeMedia(envelope.runtimeMedia, media);
-    _extractProgressiveVideos(normalized, media);
+    if (!media.any((e) => e.kind == MediaKind.video)) {
+      _extractProgressiveVideos(normalized, media);
+    }
 
-    // Only use broad direct-MP4 scanning as a fallback. When video_versions has
-    // already selected the best variant, another broad scan would re-add the low
-    // and high variants as separate downloads. That was the 0.7.9 test failure.
+    // Only use broad direct-MP4 scanning as a fallback. When runtime media or
+    // video_versions has already selected the playable variant, another broad
+    // scan would re-add alternate URLs as separate downloads.
     if (!media.any((e) => e.kind == MediaKind.video)) {
       _extractDirectVideos(normalized, media);
     }
@@ -63,13 +65,18 @@ class ThreadsParser {
     for (final item in media) {
       final cleaned = _unescape(item.url);
       if (!_isAllowedMediaUrl(cleaned)) continue;
-      unique[cleaned] = ResolvedMedia(
+      final key = item.kind == MediaKind.video ? _videoIdentityKey(cleaned) : cleaned;
+      final current = unique[key];
+      final next = ResolvedMedia(
         kind: item.kind,
         url: cleaned,
         width: item.width,
         height: item.height,
         mimeType: item.mimeType,
       );
+      if (current == null || _mediaScore(next) > _mediaScore(current)) {
+        unique[key] = next;
+      }
     }
 
     var values = unique.values.toList();
@@ -301,6 +308,12 @@ class ThreadsParser {
     // Give unknown MP4s a usable score so they still beat images, while
     // higher-resolution video_versions win when Threads provides dimensions.
     return area > 0 ? area : (item.kind == MediaKind.video ? 1 : 0);
+  }
+
+  String _videoIdentityKey(String url) {
+    final parsed = Uri.tryParse(url);
+    if (parsed == null) return url;
+    return '${parsed.host.toLowerCase()}${parsed.path}';
   }
 
   bool _looksLikeVideo(String url) {
