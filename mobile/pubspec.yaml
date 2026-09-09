@@ -1,7 +1,7 @@
 name: threadvault
-description: Clipora premium private media saver with turbo resolving, background downloads, and a 10/10 neon UI polish pass with smart one-tap capture and universal-social branding, launch animation, and backend setup fixes.
+description: Clipora premium field-run media saver with one-tap capture, background downloads, carousel saving up to 20 items, optional backend boost, and polished dark UI.
 publish_to: 'none'
-version: 0.8.5+31
+version: 0.8.7+32
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
