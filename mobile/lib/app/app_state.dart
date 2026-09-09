@@ -7,12 +7,14 @@ import '../services/session_service.dart';
 import '../services/settings_store.dart';
 import '../services/platform_services.dart';
 import '../services/threads_parser.dart';
+import '../services/universal_capture_parser.dart';
 import '../services/universal_platform_detector.dart';
 import '../services/universal_resolver_service.dart';
 
 class AppState extends ChangeNotifier {
   Timer? _sessionTimer;
   final parser = ThreadsParser();
+  final captureParser = UniversalCaptureParser();
   final historyStore = HistoryStore();
   final sessionService = SessionService();
   late final DownloadManager downloadManager = DownloadManager(historyStore);
@@ -170,7 +172,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       final source = await sourceLoader(url);
       debugPrint('[Clipora] ${platform.label} capture fallback source bytes=${source.length}');
-      return parser.parse(source, url);
+      return captureParser.parse(source, url, platform);
     }
   }
 
