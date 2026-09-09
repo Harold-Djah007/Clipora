@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Clipora backend Windows setup" -ForegroundColor Cyan
 Write-Host "This project should run on Python 3.12/3.13 on Windows. Python 3.14 can force pydantic-core to compile from Rust and fail when Visual C++ link.exe is missing." -ForegroundColor Yellow
+Write-Host "The backend uses port 8010 by default because Windows can reserve/block port 8000 and cause WinError 10013." -ForegroundColor Yellow
 
 function Get-PythonMinorVersion {
     param([string]$Exe)
@@ -87,4 +88,6 @@ if (Test-Path ".venv") {
 Write-Host "Backend setup complete. Run tests with:" -ForegroundColor Green
 Write-Host ".\.venv\Scripts\python.exe -m pytest -q" -ForegroundColor White
 Write-Host "Start API with:" -ForegroundColor Green
-Write-Host ".\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000" -ForegroundColor White
+Write-Host "powershell -ExecutionPolicy Bypass -File .\scripts\start_api.ps1" -ForegroundColor White
+Write-Host "Manual fallback:" -ForegroundColor Green
+Write-Host ".\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010" -ForegroundColor White
