@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -18,7 +20,12 @@ class DownloadsScreen extends StatefulWidget {
 
 class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingObserver {
   final controller = TextEditingController();
+  final List<_CaptureRequest> _captureQueue = [];
   String? clipboardUrl;
+  _CaptureRequest? _activeCapture;
+  int _captureSeq = 0;
+  bool _showDoneBurst = false;
+  Timer? _doneBurstTimer;
 
   static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 
@@ -35,6 +42,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _doneBurstTimer?.cancel();
+    final pending = [if (_activeCapture != null) _activeCapture!, ..._captureQueue];
+    for (final request in pending) {
+      request.timeout?.cancel();
+      if (!request.completer.isCompleted) {
+        request.completer.completeError(StateError('Clipora closed before background capture finished.'));
+      }
+    }
     controller.dispose();
     super.dispose();
   }
@@ -81,7 +96,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
   }
 
   Future<void> _save() async {
-    final urls = _extractUrls(controller.text);
+    final submittedText = controller.text;
+    final urls = _extractUrls(submittedText);
     if (urls.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Paste a link first.')),
@@ -89,18 +105,69 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       return;
     }
 
-    await context.read<AppState>().resolveAndDownload(
+    final ok = await context.read<AppState>().resolveAndDownload(
       urls,
-      sourceLoader: (url) async {
-        final source = await Navigator.of(context).push<String>(
-          MaterialPageRoute(builder: (_) => _CapturePage(url: url), fullscreenDialog: true),
-        );
-        if (source == null || source.isEmpty) {
-          throw StateError('Capture was cancelled before media was found.');
-        }
-        return source;
-      },
+      sourceLoader: _captureInBackground,
     );
+
+    if (!mounted) return;
+    if (ok) {
+      setState(() {
+        if (controller.text == submittedText) {
+          controller.clear();
+          clipboardUrl = null;
+        }
+      });
+      _flashDoneBurst();
+    }
+  }
+
+  Future<String> _captureInBackground(String url) {
+    final request = _CaptureRequest(
+      id: _captureSeq++,
+      url: url,
+      completer: Completer<String>(),
+    );
+    request.timeout = Timer(const Duration(seconds: 32), () {
+      _completeCapture(
+        request,
+        error: StateError('Background capture timed out. Open the post once in Private Access, make sure it plays, then retry.'),
+      );
+    });
+    _captureQueue.add(request);
+    _pumpCaptureQueue();
+    return request.completer.future;
+  }
+
+  void _pumpCaptureQueue() {
+    if (!mounted || _activeCapture != null || _captureQueue.isEmpty) return;
+    setState(() => _activeCapture = _captureQueue.removeAt(0));
+  }
+
+  void _completeCapture(_CaptureRequest request, {String? source, Object? error}) {
+    request.timeout?.cancel();
+    _captureQueue.remove(request);
+    if (_activeCapture != request) return;
+
+    if (!request.completer.isCompleted) {
+      if (source != null && source.isNotEmpty) {
+        request.completer.complete(source);
+      } else {
+        request.completer.completeError(error ?? StateError('Background capture ended before media was found.'));
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _activeCapture = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pumpCaptureQueue());
+  }
+
+  void _flashDoneBurst() {
+    _doneBurstTimer?.cancel();
+    setState(() => _showDoneBurst = true);
+    _doneBurstTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _showDoneBurst = false);
+    });
   }
 
   @override
@@ -111,129 +178,150 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
     final recent = app.history.take(3).toList();
 
     return CliporaPage(
-      child: ListView(
-        padding: EdgeInsets.zero,
+      child: Stack(
         children: [
-          CliporaSectionTitle(
-            title: 'Save',
-            subtitle: 'Paste any supported social link. Clipora uses the universal backend first, then private-safe Threads capture when needed.',
-            trailing: const ThreadVaultMark(size: 36, showGlow: false),
-          ),
-          const SizedBox(height: 20),
-          if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
-            PremiumCard(
-              child: Row(children: [
-                const Icon(Icons.content_paste_rounded, size: 18, color: Color(0xFF8BE9E0)),
-                const SizedBox(width: 10),
-                const Expanded(child: Text('A link is on your clipboard', style: TextStyle(fontWeight: FontWeight.w700))),
-                TextButton(
-                  onPressed: () => setState(() => controller.text = clipboardUrl!),
-                  child: const Text('Paste'),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 12),
-          ],
-          PremiumCard(
-            glow: true,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Positioned.fill(
+            child: ListView(
+              padding: EdgeInsets.zero,
               children: [
-                TextField(
-                  controller: controller,
-                  minLines: 3,
-                  maxLines: 5,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, Threads…',
-                    prefixIcon: const Icon(Icons.link_rounded),
-                    suffixIcon: controller.text.isEmpty
-                        ? IconButton(
-                            tooltip: 'Paste',
-                            onPressed: _readClipboard,
-                            icon: const Icon(Icons.content_paste_go_rounded),
-                          )
-                        : IconButton(
-                            tooltip: 'Clear',
-                            onPressed: () => setState(() => controller.clear()),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                  ),
+                CliporaSectionTitle(
+                  title: 'Save',
+                  subtitle: 'Paste any supported social link. Clipora resolves and captures quietly, then saves to Gallery.',
+                  trailing: const ThreadVaultMark(size: 36, showGlow: false),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  urls.isEmpty
-                      ? 'Supported: ${UniversalPlatformDetector.supportedLabel}. Keep the backend open for non-Threads links.'
-                      : '${urls.length} link${urls.length == 1 ? '' : 's'} ready',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12.5, height: 1.35),
-                ),
-                if (matches.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: matches.map(_platformPill).toList(growable: false),
-                  ),
-                ],
-                const SizedBox(height: 14),
-                CliporaPrimaryButton(
-                  onPressed: app.busy ? null : _save,
-                  icon: Icon(app.busy ? Icons.hourglass_top_rounded : Icons.download_rounded, color: app.busy ? Colors.white54 : const Color(0xFF041216)),
-                  label: app.busy ? 'Saving…' : urls.length > 1 ? 'Save ${urls.length} links' : 'Save media',
-                ),
-              ],
-            ),
-          ),
-          if (app.status != null) ...[
-            const SizedBox(height: 12),
-            PremiumCard(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    app.busy
-                        ? Icons.sync_rounded
-                        : app.lastRunHadErrors
-                            ? Icons.error_outline_rounded
-                            : Icons.check_circle_outline_rounded,
-                    color: app.lastRunHadErrors ? const Color(0xFFF0A8A8) : const Color(0xFF8BE9E0),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(app.status!, style: const TextStyle(height: 1.4, color: Colors.white70))),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          const Text('How it works', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-          const SizedBox(height: 10),
-          const PremiumCard(
-            child: Column(
-              children: [
-                _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
-                _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
-                _Step(n: '3', text: 'Threads stays on local capture. Instagram and Facebook fall back to capture if the backend cannot resolve them.'),
-                _Step(n: '4', text: 'Set Resolver URL in Settings to your PC LAN IP, then the file is validated and saved to Gallery.'),
-              ],
-            ),
-          ),
-          if (recent.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Text('Recent', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            const SizedBox(height: 10),
-            ...recent.map((item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: PremiumCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                const SizedBox(height: 20),
+                if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
+                  PremiumCard(
                     child: Row(children: [
-                      Icon(item.kind == MediaKind.video ? Icons.play_circle_outline_rounded : Icons.image_outlined, color: const Color(0xFF8BE9E0)),
+                      const Icon(Icons.content_paste_rounded, size: 18, color: Color(0xFF8BE9E0)),
                       const SizedBox(width: 10),
-                      Expanded(child: Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
-                      Text(item.status == DownloadStatus.completed ? 'Saved' : 'Failed', style: TextStyle(fontSize: 12, color: item.status == DownloadStatus.completed ? const Color(0xFF86EFAC) : const Color(0xFFF0A8A8))),
+                      const Expanded(child: Text('A link is on your clipboard', style: TextStyle(fontWeight: FontWeight.w700))),
+                      TextButton(
+                        onPressed: () => setState(() => controller.text = clipboardUrl!),
+                        child: const Text('Paste'),
+                      ),
                     ]),
                   ),
-                )),
-          ],
+                  const SizedBox(height: 12),
+                ],
+                PremiumCard(
+                  glow: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        minLines: 3,
+                        maxLines: 5,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, Threads…',
+                          prefixIcon: const Icon(Icons.link_rounded),
+                          suffixIcon: controller.text.isEmpty
+                              ? IconButton(
+                                  tooltip: 'Paste',
+                                  onPressed: _readClipboard,
+                                  icon: const Icon(Icons.content_paste_go_rounded),
+                                )
+                              : IconButton(
+                                  tooltip: 'Clear',
+                                  onPressed: () => setState(() => controller.clear()),
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        urls.isEmpty
+                            ? 'Supported: ${UniversalPlatformDetector.supportedLabel}. You can add another link while a save is already running.'
+                            : '${urls.length} link${urls.length == 1 ? '' : 's'} ready',
+                        style: const TextStyle(color: Colors.white54, fontSize: 12.5, height: 1.35),
+                      ),
+                      if (matches.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: matches.map(_platformPill).toList(growable: false),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      CliporaPrimaryButton(
+                        onPressed: _save,
+                        icon: Icon(app.busy ? Icons.add_circle_outline_rounded : Icons.download_rounded, color: const Color(0xFF041216)),
+                        label: app.busy
+                            ? 'Add another save'
+                            : urls.length > 1
+                                ? 'Save ${urls.length} links'
+                                : 'Save media',
+                      ),
+                    ],
+                  ),
+                ),
+                if (app.status != null) ...[
+                  const SizedBox(height: 12),
+                  _DownloadStatusCard(
+                    status: app.status!,
+                    busy: app.busy,
+                    activeJobs: app.activeJobs,
+                    hasErrors: app.lastRunHadErrors,
+                  ),
+                ],
+                const SizedBox(height: 20),
+                const Text('How it works', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                const SizedBox(height: 10),
+                const PremiumCard(
+                  child: Column(
+                    children: [
+                      _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
+                      _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
+                      _Step(n: '3', text: 'Threads, Instagram, and Facebook capture quietly in the background when needed.'),
+                      _Step(n: '4', text: 'The file is validated, saved to Gallery, the link box clears, and Clipora notifies you when finished.'),
+                    ],
+                  ),
+                ),
+                if (recent.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  const Text('Recent', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  const SizedBox(height: 10),
+                  ...recent.map((item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: PremiumCard(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          child: Row(children: [
+                            Icon(item.kind == MediaKind.video ? Icons.play_circle_outline_rounded : Icons.image_outlined, color: const Color(0xFF8BE9E0)),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
+                            Text(item.status == DownloadStatus.completed ? 'Saved' : 'Failed', style: TextStyle(fontSize: 12, color: item.status == DownloadStatus.completed ? const Color(0xFF86EFAC) : const Color(0xFFF0A8A8))),
+                          ]),
+                        ),
+                      )),
+                ],
+              ],
+            ),
+          ),
+          if (_activeCapture != null)
+            Positioned(
+              left: 0,
+              top: 0,
+              width: 1,
+              height: 1,
+              child: Opacity(
+                opacity: 0.01,
+                child: IgnorePointer(
+                  child: _HiddenCaptureHost(
+                    key: ValueKey(_activeCapture!.id),
+                    url: _activeCapture!.url,
+                    onComplete: (source) => _completeCapture(_activeCapture!, source: source),
+                    onFailed: (error) => _completeCapture(_activeCapture!, error: error),
+                  ),
+                ),
+              ),
+            ),
+          if (_showDoneBurst)
+            const Positioned.fill(
+              child: IgnorePointer(child: _DoneBurst()),
+            ),
         ],
       ),
     );
@@ -244,7 +332,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       icon: match.icon,
       label: match.label,
       value: match.isThreads
-          ? 'capture'
+          ? 'quiet capture'
           : match.usesCaptureFallback
               ? 'backend+'
               : match.preferBackend
@@ -253,6 +341,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       color: match.accent,
     );
   }
+}
+
+class _CaptureRequest {
+  _CaptureRequest({required this.id, required this.url, required this.completer});
+
+  final int id;
+  final String url;
+  final Completer<String> completer;
+  Timer? timeout;
 }
 
 class _Step extends StatelessWidget {
@@ -282,27 +379,171 @@ class _Step extends StatelessWidget {
   }
 }
 
-class _CapturePage extends StatefulWidget {
-  final String url;
-  const _CapturePage({required this.url});
+class _DownloadStatusCard extends StatefulWidget {
+  const _DownloadStatusCard({
+    required this.status,
+    required this.busy,
+    required this.activeJobs,
+    required this.hasErrors,
+  });
+
+  final String status;
+  final bool busy;
+  final int activeJobs;
+  final bool hasErrors;
 
   @override
-  State<_CapturePage> createState() => _CapturePageState();
+  State<_DownloadStatusCard> createState() => _DownloadStatusCardState();
 }
 
-class _CapturePageState extends State<_CapturePage> {
+class _DownloadStatusCardState extends State<_DownloadStatusCard> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.busy) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DownloadStatusCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.busy && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!widget.busy && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = widget.busy
+        ? Icons.downloading_rounded
+        : widget.hasErrors
+            ? Icons.error_outline_rounded
+            : Icons.check_circle_outline_rounded;
+    final color = widget.hasErrors ? const Color(0xFFF0A8A8) : const Color(0xFF8BE9E0);
+
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, child) {
+        final scale = widget.busy ? 1 + (_pulse.value * .04) : 1.0;
+        return Transform.scale(scale: scale, child: child);
+      },
+      child: PremiumCard(
+        glow: widget.busy,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 10),
+                Expanded(child: Text(widget.status, style: const TextStyle(height: 1.4, color: Colors.white70))),
+              ],
+            ),
+            if (widget.busy) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: const LinearProgressIndicator(minHeight: 6),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.activeJobs > 1 ? '${widget.activeJobs} saves running. You can paste another link.' : 'Saving in the background. You can paste another link.',
+                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DoneBurst extends StatelessWidget {
+  const _DoneBurst();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: .7, end: 1),
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOutBack,
+        builder: (context, value, child) => Opacity(
+          opacity: value.clamp(0.0, 1.0),
+          child: Transform.scale(scale: value, child: child),
+        ),
+        child: PremiumCard(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.check_circle_rounded, color: Color(0xFF86EFAC), size: 42),
+              SizedBox(height: 8),
+              Text('Saved to Gallery', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+              SizedBox(height: 4),
+              Text('Ready for the next link', style: TextStyle(color: Colors.white60, fontSize: 12.5)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HiddenCaptureHost extends StatefulWidget {
+  const _HiddenCaptureHost({
+    super.key,
+    required this.url,
+    required this.onComplete,
+    required this.onFailed,
+  });
+
+  final String url;
+  final ValueChanged<String> onComplete;
+  final ValueChanged<Object> onFailed;
+
+  @override
+  State<_HiddenCaptureHost> createState() => _HiddenCaptureHostState();
+}
+
+class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
   InAppWebViewController? _controller;
-  String _status = 'Opening post';
+  String? _lastSource;
   bool _done = false;
-  bool _pageLoaded = false;
+  Timer? _timeout;
 
   static const _js = r'''
     (function() {
       function abs(u) { try { return new URL(u, location.href).href; } catch (e) { return u; } }
       const runtime = [];
       document.querySelectorAll('video').forEach(function(v) {
-        const u = v.currentSrc || v.src;
-        if (u) runtime.push({kind:'video', url: abs(u), width: v.videoWidth || null, height: v.videoHeight || null});
+        try {
+          v.muted = true;
+          v.setAttribute('muted', '');
+          v.setAttribute('playsinline', '');
+          v.playsInline = true;
+          const attempt = v.play();
+          if (attempt && attempt.catch) attempt.catch(function() {});
+        } catch (e) {}
+        const urls = [v.currentSrc, v.src];
+        v.querySelectorAll('source').forEach(function(s) { urls.push(s.src); });
+        urls.forEach(function(u) {
+          if (u) runtime.push({kind:'video', url: abs(u), width: v.videoWidth || null, height: v.videoHeight || null});
+        });
       });
       document.querySelectorAll('img').forEach(function(img) {
         const u = img.currentSrc || img.src;
@@ -320,20 +561,56 @@ class _CapturePageState extends State<_CapturePage> {
     })();
   ''';
 
-  Future<void> _capture({bool force = false}) async {
+  @override
+  void initState() {
+    super.initState();
+    _timeout = Timer(const Duration(seconds: 30), () {
+      if (_done) return;
+      if (_lastSource != null && _lastSource!.isNotEmpty) {
+        _finish(_lastSource!);
+      } else {
+        _fail(StateError('Background capture timed out before the page exposed media.'));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timeout?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _capture({bool finalAttempt = false}) async {
     if (_done || _controller == null) return;
     try {
       final raw = await _controller!.evaluateJavascript(source: _js);
       if (raw is! String || raw.isEmpty || raw == 'null') return;
       final source = raw.startsWith('"') ? _unquote(raw) : raw;
-      final ready = source.contains('.mp4') || source.contains('cdninstagram') || source.contains('fbcdn');
-      if (ready || force) {
-        _done = true;
-        if (mounted) Navigator.pop(context, source);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _status = 'Capture is waiting for the page. Play the video once, then tap Capture.');
+      _lastSource = source;
+      final ready = source.contains('.mp4') ||
+          source.contains('"kind":"video"') ||
+          source.contains('video_versions') ||
+          source.contains('playable_url') ||
+          source.contains('cdninstagram') ||
+          source.contains('fbcdn');
+      if (ready || finalAttempt) _finish(source);
+    } catch (error) {
+      if (finalAttempt) _fail(error);
     }
+  }
+
+  void _finish(String source) {
+    if (_done) return;
+    _done = true;
+    _timeout?.cancel();
+    widget.onComplete(source);
+  }
+
+  void _fail(Object error) {
+    if (_done) return;
+    _done = true;
+    _timeout?.cancel();
+    widget.onFailed(error);
   }
 
   String _unquote(String raw) {
@@ -341,100 +618,24 @@ class _CapturePageState extends State<_CapturePage> {
     return raw.substring(1, raw.length - 1).replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
   }
 
-  void _cancel() {
-    if (mounted) Navigator.pop(context);
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF07090F),
-      appBar: AppBar(
-        title: Text(_status, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-        leading: IconButton(
-          tooltip: 'Back',
-          onPressed: _cancel,
-          icon: const Icon(Icons.close_rounded),
-        ),
-        actions: [
-          TextButton(onPressed: () => _capture(force: true), child: const Text('Capture')),
-        ],
+    return InAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        thirdPartyCookiesEnabled: true,
+        cacheEnabled: true,
+        mediaPlaybackRequiresUserGesture: false,
+        allowsInlineMediaPlayback: true,
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-              initialSettings: InAppWebViewSettings(
-                javaScriptEnabled: true,
-                thirdPartyCookiesEnabled: true,
-                cacheEnabled: true,
-                mediaPlaybackRequiresUserGesture: false,
-                allowsInlineMediaPlayback: true,
-              ),
-              onWebViewCreated: (c) => _controller = c,
-              onLoadStart: (_, __) {
-                if (mounted) {
-                  setState(() {
-                    _pageLoaded = false;
-                    _status = 'Opening post';
-                  });
-                }
-              },
-              onLoadStop: (_, __) async {
-                if (!mounted) return;
-                setState(() {
-                  _pageLoaded = true;
-                  _status = 'Reading media';
-                });
-                for (var i = 0; i < 12 && !_done; i++) {
-                  await Future<void>.delayed(const Duration(milliseconds: 700));
-                  await _capture();
-                }
-                if (!_done && mounted) {
-                  setState(() => _status = 'Play the video once, then tap Capture');
-                }
-              },
-            ),
-          ),
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 12,
-            child: SafeArea(
-              child: PremiumCard(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Icon(_pageLoaded ? Icons.touch_app_rounded : Icons.sync_rounded, color: const Color(0xFF8BE9E0), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_status, style: const TextStyle(fontWeight: FontWeight.w800))),
-                    ]),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Some social pages render as a black WebView while media loads. Wait a few seconds, play the video once, then tap Capture. Use Back to return safely.',
-                      style: TextStyle(color: Colors.white60, fontSize: 12.5, height: 1.3),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(children: [
-                      TextButton(onPressed: _cancel, child: const Text('Back')),
-                      const Spacer(),
-                      FilledButton.icon(
-                        onPressed: () => _capture(force: true),
-                        icon: const Icon(Icons.center_focus_strong_rounded, size: 18),
-                        label: const Text('Capture'),
-                      ),
-                    ]),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+      onWebViewCreated: (c) => _controller = c,
+      onLoadStop: (_, __) async {
+        for (var i = 0; i < 16 && !_done; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 700));
+          await _capture(finalAttempt: i == 15);
+        }
+      },
     );
   }
 }
