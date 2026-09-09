@@ -21,9 +21,9 @@ class DownloadForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Clipora"
-        val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Saving Threads media…"
-        ensureChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(title, message))
+        val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Saving media…"
+        ensureChannels(this)
+        startForeground(NOTIFICATION_ID, buildProgressNotification(this, title, message))
         return START_STICKY
     }
 
@@ -46,48 +46,9 @@ class DownloadForegroundService : Service() {
         }
     }
 
-    private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Clipora downloads",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Keeps Clipora downloads alive while the app is in the background."
-            setShowBadge(false)
-        }
-        manager.createNotificationChannel(channel)
-    }
-
-    private fun buildNotification(title: String, message: String): Notification {
-        val launchIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-        val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, flags)
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-
-        return builder
-            .setContentTitle(title)
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(Notification.CATEGORY_PROGRESS)
-            .build()
-    }
-
     companion object {
         private const val CHANNEL_ID = "clipora_downloads"
+        private const val COMPLETE_CHANNEL_ID = "clipora_download_complete"
         private const val NOTIFICATION_ID = 7107
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_MESSAGE = "message"
@@ -104,8 +65,87 @@ class DownloadForegroundService : Service() {
             }
         }
 
+        fun complete(context: Context, title: String, message: String, success: Boolean) {
+            ensureChannels(context)
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            manager.notify(notificationId, buildCompleteNotification(context, title, message, success))
+        }
+
         fun stop(context: Context) {
             context.stopService(Intent(context, DownloadForegroundService::class.java))
+        }
+
+        private fun ensureChannels(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val progress = NotificationChannel(
+                CHANNEL_ID,
+                "Clipora downloads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps Clipora downloads alive while the app is in the background."
+                setShowBadge(false)
+            }
+            val complete = NotificationChannel(
+                COMPLETE_CHANNEL_ID,
+                "Clipora finished downloads",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Shows when Clipora has finished saving media."
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(progress)
+            manager.createNotificationChannel(complete)
+        }
+
+        private fun buildProgressNotification(context: Context, title: String, message: String): Notification {
+            val pendingIntent = launchPendingIntent(context)
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+
+            return builder
+                .setContentTitle(title)
+                .setContentText(message)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_PROGRESS)
+                .build()
+        }
+
+        private fun buildCompleteNotification(context: Context, title: String, message: String, success: Boolean): Notification {
+            val pendingIntent = launchPendingIntent(context)
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, COMPLETE_CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+
+            return builder
+                .setContentTitle(title)
+                .setContentText(message)
+                .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
+                .setContentIntent(pendingIntent)
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .build()
+        }
+
+        private fun launchPendingIntent(context: Context): PendingIntent {
+            val launchIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            return PendingIntent.getActivity(context, 0, launchIntent, flags)
         }
     }
 }
