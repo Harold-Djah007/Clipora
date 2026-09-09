@@ -10,7 +10,7 @@ class UniversalResolverService {
   UniversalResolverService({Dio? dio, String? preferredBaseUrl})
       : _dio = dio ??
             Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 4),
+              connectTimeout: const Duration(seconds: 2),
               sendTimeout: const Duration(seconds: 12),
               receiveTimeout: const Duration(seconds: 180),
               validateStatus: (code) => code != null && code >= 200 && code < 500,
@@ -20,14 +20,20 @@ class UniversalResolverService {
 
   List<String> get baseUrls => ResolverUrl.candidates(preferredBaseUrl);
 
+  bool get hasConfiguredBackend => baseUrls.isNotEmpty;
+
   Future<String> ping() async {
+    if (baseUrls.isEmpty) {
+      throw StateError('Field Mode is active. No backend resolver is configured, so Clipora will use on-device Smart Capture.');
+    }
+
     Object? lastError;
     for (final baseUrl in baseUrls) {
       try {
         final response = await _dio.get(
           '$baseUrl/api/health',
           options: Options(
-            connectTimeout: const Duration(seconds: 3),
+            connectTimeout: const Duration(seconds: 2),
             receiveTimeout: const Duration(seconds: 3),
           ),
         );
@@ -37,7 +43,7 @@ class UniversalResolverService {
       }
     }
     throw StateError(
-      'Clipora backend is not reachable. Keep start_api.ps1 running, set Resolver URL to your PC LAN IP, or run adb reverse tcp:8010 tcp:8010. Last error: ${_shortError(lastError)}',
+      'Optional backend is not reachable. Clipora can still run in Field Mode using on-device Smart Capture. Last error: ${_shortError(lastError)}',
     );
   }
 
@@ -45,6 +51,9 @@ class UniversalResolverService {
     final platform = UniversalPlatformDetector.detect(url);
     if (!platform.isSupported) {
       throw StateError('Unsupported link. Clipora supports ${UniversalPlatformDetector.supportedLabel}.');
+    }
+    if (baseUrls.isEmpty) {
+      throw StateError('No optional backend resolver configured.');
     }
 
     Object? lastError;
@@ -67,7 +76,7 @@ class UniversalResolverService {
     }
 
     throw StateError(
-      'Clipora backend is not reachable. In Settings, set Resolver URL to the address printed by start_api.ps1. USB option: adb reverse tcp:8010 tcp:8010. Last error: ${_shortError(lastError)}',
+      'Optional backend is not reachable. Clipora can still run in Field Mode using on-device Smart Capture. Last error: ${_shortError(lastError)}',
     );
   }
 
