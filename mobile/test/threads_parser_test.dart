@@ -107,7 +107,6 @@ void main() {
     expect(post.media.single.url, contains('hd.mp4'));
   });
 
-
   test('rejects poster-only result when resolver says this is a video post', () {
     final source = jsonEncode({
       'canonicalUrl': 'https://www.threads.com/@whitemansdaughter/post/Dbd6IzSCLAa',
@@ -137,7 +136,6 @@ void main() {
     expect(post.media, hasLength(1));
     expect(post.media.single.kind, MediaKind.image);
   });
-
 
   test('rejects share-link image-only snapshots unless user chooses Photos', () {
     final source = jsonEncode({
@@ -170,4 +168,42 @@ void main() {
     expect(post.media.single.kind, MediaKind.image);
   });
 
+  test('does not save one played Threads video twice when html has another variant', () {
+    final source = jsonEncode({
+      'canonicalUrl': 'https://www.threads.com/@whitemansdaughter/post/DYcaQwFgZos',
+      'pageUrl': 'https://www.threads.com/@whitemansdaughter/post/DYcaQwFgZos',
+      'runtimeMedia': [
+        {
+          'kind': 'video',
+          'url': 'https://instagram.facc6-1.fna.fbcdn.net/o1/v/t16/f1/m82/single-video.mp4?runtime=1',
+          'width': 540,
+          'height': 960,
+        },
+      ],
+      'html': r'{"video_versions":[{"width":540,"height":960,"url":"https:\/\/instagram.facc6-1.fna.fbcdn.net\/o1\/v\/t16\/f1\/m82\/single-video.mp4?progressive=1"}]}',
+      'hasVideo': true,
+    });
+
+    final post = parser.parse(source, 'https://www.threads.com/@whitemansdaughter/post/DYcaQwFgZos');
+    expect(post.media, hasLength(1));
+    expect(post.media.single.kind, MediaKind.video);
+    expect(post.media.single.url, contains('runtime=1'));
+  });
+
+  test('keeps distinct runtime videos when Threads really exposes more than one', () {
+    final source = jsonEncode({
+      'canonicalUrl': 'https://www.threads.com/@creator/post/ABC123',
+      'pageUrl': 'https://www.threads.com/@creator/post/ABC123',
+      'runtimeMedia': [
+        {'kind': 'video', 'url': 'https://instagram.facc6-1.fna.fbcdn.net/o1/v/t16/f1/m82/first.mp4?sig=1'},
+        {'kind': 'video', 'url': 'https://instagram.facc6-1.fna.fbcdn.net/o1/v/t16/f1/m82/second.mp4?sig=2'},
+      ],
+      'html': '<html></html>',
+      'hasVideo': true,
+    });
+
+    final post = parser.parse(source, 'https://www.threads.com/@creator/post/ABC123');
+    expect(post.media, hasLength(2));
+    expect(post.media.every((item) => item.kind == MediaKind.video), isTrue);
+  });
 }
