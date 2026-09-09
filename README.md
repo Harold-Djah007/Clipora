@@ -1,69 +1,57 @@
-# ThreadVault 0.6
+# Clipora
 
-ThreadVault is a local-first Flutter Android app for downloading media from Threads posts that the signed-in user is already authorized to view.
+Clipora is a premium social media saver focused on a stressless paste-link flow.
 
-## Implemented in this build
+Current mobile baseline: **0.8.3 autopilot playback capture**.
+Current backend upgrade branch: **universal resolver foundation**.
 
-- Public Threads post resolution through an embedded browser
-- Private-post support through the user's own Threads login
-- **No Threads password storage**: login happens directly inside the Threads web page
-- Batch input: paste many Threads links at once
-- Multiple videos per post
-- Images / carousel candidate extraction
-- Progressive `video_versions` extraction, with DASH MP4 fallback
-- Automatic JSON/HTML URL unescaping (`\/`, `\u0026`, HTML entities, etc.)
-- Smart filename templates: `{author}`, `{postId}`, `{index}`
-- Optional caption `.txt` sidecar files
-- On-device download history with status/error tracking
-- Share downloaded media from History
-- Session reconnect workflow
-- Session status indicator
-- Automatic session expiry / cookie wipe with configurable TTL
-- Explicit “Delete session now” control
-- Premium Material 3 dark UI
-- Optional FastAPI resolver backend for public/authorized local deployments
-- Dockerfile + docker-compose for the optional API
-- Backend parser regression tests
+## Current stable mobile behavior
 
-## Everyday workflow
+The mobile app handles Threads media that the signed-in user is already authorized to view. It saves real MP4 videos, photos, and carousels while rejecting poster images, page artwork, sprites, audio-only resources, and unrelated static assets.
 
-1. Open **Private** once and sign in to Threads if private content is needed.
-2. Return to **Download**.
-3. Paste one or many `threads.com/@user/post/...` links.
-4. Tap **Download media** / **Download batch**.
-5. ThreadVault opens each post in its embedded browser, extracts the media data locally, downloads every resolved item, and records it in **History**.
+### 0.8.3 mobile highlights
 
-Public posts do not require a connected Threads session. Private posts only work if the connected Threads account can already view them.
+- Smart Save: one tap tries hidden resolving first, then uses Smart Capture automatically without forcing Video/Post choices.
+- Autopilot playback: Smart Capture tries to start videos by itself using muted inline autoplay plus repeated play-control nudges.
+- Faster resolving: shorter hidden checks, faster canonical detection, and faster Smart Capture polling.
+- Video-safe media rules: video posts wait for real MP4 and do not fall back to low-quality poster JPG.
+- Photo/carousel support for real image-only posts.
+- Background foreground-service downloads, wake lock, Clipora folders, launch animation, and compact neon UI.
 
-## Privacy model
+## Universal downloader foundation
 
-The mobile app is deliberately local-first. Threads authentication cookies remain in the app WebView cookie jar. ThreadVault stores only non-secret session metadata in encrypted device storage to track connection age. The user's Threads password is never collected or sent to the ThreadVault backend.
+Clipora is being upgraded from a Threads-focused saver into a universal social saver architecture.
 
-When auto-delete is enabled, ThreadVault checks session age periodically and clears the embedded-browser cookies after the configured lifetime. The user can also wipe the session immediately from the Private tab.
+Target platforms:
 
-## Mobile development
+- Threads
+- TikTok
+- Instagram
+- X / Twitter
+- Pinterest
+- Facebook
+- Snapchat public/share links
+- YouTube/Shorts where supported
 
-Requirements: Flutter 3.24+ / Dart 3.4+, Android SDK, JDK 17.
+The backend now has a platform-detection layer and a `yt-dlp`-powered universal resolver foundation. Threads remains connected to the existing local-session-aware resolver so the working private-video flow does not regress.
 
-```bash
-cd mobile
-flutter pub get
-flutter run
+## Universal API endpoints
+
+```text
+POST /api/detect
+POST /api/resolve/universal
+POST /api/downloads
 ```
 
-An Android project scaffold is included under `mobile/android`. If a local Flutter version requires regenerated platform files, run `flutter create . --platforms android` from `mobile/` and keep the existing `lib/` and `pubspec.yaml`.
-
-### Release APK
-
-Before distributing a release, replace the debug signing configuration with your own Android keystore, then:
+Example:
 
 ```bash
-flutter build apk --release
+curl -X POST http://127.0.0.1:8000/api/detect \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://x.com/user/status/1234567890"}'
 ```
 
-## Optional API
-
-The mobile app does not need the API for its private-session flow. The API exists for future sync, public resolving, or a self-hosted deployment.
+## Backend development
 
 ```bash
 cd backend
@@ -74,18 +62,34 @@ pytest -q
 uvicorn app.main:app --reload --port 8000
 ```
 
-Or:
+On Windows PowerShell:
 
-```bash
-docker compose up --build
+```powershell
+cd "C:\Users\A S U S\Desktop\Clipora\backend"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pytest -q
+uvicorn app.main:app --reload --port 8000
 ```
 
-Set a strong `SESSION_ENCRYPTION_KEY` before storing any server-side authorized session blob.
+## Mobile development
 
-## Important limitations
+```powershell
+cd "C:\Users\A S U S\Desktop\Clipora\mobile"
+flutter clean
+flutter pub get
+flutter test
+flutter build apk --debug --no-pub
+& "C:\Android\Sdk\platform-tools\adb.exe" install -r "build\app\outputs\flutter-apk\app-debug.apk"
+```
 
-Threads can change its web payload structure without notice. The resolver is isolated in `mobile/lib/services/threads_parser.dart` and `backend/app/services/threads_provider.py` so parsing rules can be updated without redesigning the app.
+## Storage
 
-Signed Instagram/Meta CDN media URLs also expire. ThreadVault obtains them immediately before downloading rather than saving them as permanent source URLs.
+- Videos: `Movies/Clipora`
+- Photos: `Pictures/Clipora`
+- Captions: `Downloads/Clipora`
 
-This build does not circumvent private-account controls. It only processes content visible to the connected account.
+## Privacy and safety
+
+Clipora does not ask for, store, or handle platform passwords. Private/restricted media must only work through a local signed-in session for content the user is already allowed to view. Clipora preserves source/creator metadata and does not add its own watermark.
