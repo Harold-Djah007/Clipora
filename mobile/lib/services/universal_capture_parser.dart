@@ -4,6 +4,8 @@ import '../models/media_models.dart';
 import 'universal_platform_detector.dart';
 
 class UniversalCaptureParser {
+  static const int maxCapturedMedia = 20;
+
   ResolvedPost parse(String source, String postUrl, PlatformMatch platform) {
     final envelope = _decodeEnvelope(source);
     final normalized = _decodeHtml(envelope.html);
@@ -48,9 +50,10 @@ class UniversalCaptureParser {
     if (videos.isNotEmpty) {
       values = videos;
     }
+    values = values.take(maxCapturedMedia).toList(growable: false);
     if (values.isEmpty) {
       throw FormatException(
-        'No real ${platform.label} media was found in Smart Capture. Open the post, wait for it to load, play the video once, then tap Capture.',
+        'No real ${platform.label} media was found in Field Mode. Open the post, wait for it to load, play the video once, then tap Capture.',
       );
     }
 
@@ -124,6 +127,7 @@ class UniversalCaptureParser {
 
   void _extractDirectVideos(String source, List<ResolvedMedia> out) {
     final patterns = [
+      RegExp(r'"(?:video_url|playable_url|playback_url|src)"\s*:\s*"([^"]+)"', caseSensitive: false),
       RegExp(r'"(?:video_url|playable_url|src)"\s*:\s*"([^"]+\.mp4[^"]*)"', caseSensitive: false),
       RegExp(r'''https?:\\?/\\?/[^"'<>\s]+?\.mp4[^"'<>\s]*''', caseSensitive: false),
       RegExp(r'''https?://[^"'<>\s]+?\.mp4[^"'<>\s]*''', caseSensitive: false),
@@ -159,10 +163,13 @@ class UniversalCaptureParser {
     final lower = source.toLowerCase();
     return lower.contains('video_url') ||
         lower.contains('playable_url') ||
+        lower.contains('playback_url') ||
         lower.contains('video_versions') ||
         lower.contains('<video') ||
         lower.contains('.mp4') ||
-        lower.contains('mime_type=video');
+        lower.contains('/video/') ||
+        lower.contains('mime_type=video') ||
+        lower.contains('mime=video');
   }
 
   bool _isAllowedCaptureMediaUrl(String url) {
@@ -179,7 +186,14 @@ class UniversalCaptureParser {
     final lower = url.toLowerCase();
     return _isHttp(url) &&
         !_looksLikeAudio(lower) &&
-        (lower.contains('.mp4') || lower.contains('mime_type=video'));
+        !lower.contains('.m3u8') &&
+        !lower.contains('mpegurl') &&
+        (lower.contains('.mp4') ||
+            lower.contains('mime_type=video') ||
+            lower.contains('mime=video') ||
+            lower.contains('video/mp4') ||
+            lower.contains('/video/') ||
+            lower.contains('format=mp4'));
   }
 
   bool _looksLikeImage(String url) {
@@ -190,6 +204,7 @@ class UniversalCaptureParser {
 
   bool _looksLikeAudio(String lower) {
     return lower.contains('mime_type=audio') ||
+        lower.contains('mime=audio') ||
         lower.contains('/audio/') ||
         lower.endsWith('.m4a') ||
         lower.endsWith('.mp3') ||
