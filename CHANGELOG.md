@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.7 Field Mode commercial polish
+- Field Mode is the default: Clipora can run on a phone without a PC backend/server.
+- Optional Resolver URLs still work for advanced LAN/cloud setups, but they are no longer required.
+- Legacy localhost resolver settings are migrated back to blank Field Mode so sold/test installs do not fail on `127.0.0.1:8010`.
+- Field capture now keeps up to 20 media items, dedupes signed duplicate video variants, and can keep strong mixed carousel image slides without saving single video posters.
+- Paste-clear remains tied to successful saves only.
+
 ## 0.8.5 Phone-ready universal saver
 - Added a Resolver URL setting with a backend health check for LAN and USB testing.
 - Bound the Windows start script to `0.0.0.0` and printed the PC LAN address for phone tests.
