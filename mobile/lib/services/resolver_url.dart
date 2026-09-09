@@ -1,5 +1,8 @@
 class ResolverUrl {
-  static const defaultValue = 'http://127.0.0.1:8010';
+  /// Empty means Field Mode: Clipora does not require a PC/local backend.
+  /// Users can still enter a LAN/USB/cloud resolver for platforms where a
+  /// backend gives better extraction.
+  static const defaultValue = '';
 
   static const fallbacks = [
     'http://127.0.0.1:8010',
@@ -7,6 +10,8 @@ class ResolverUrl {
     'http://127.0.0.1:8765',
     'http://10.0.2.2:8010',
   ];
+
+  static bool isConfigured(String raw) => normalize(raw).isNotEmpty;
 
   static String normalize(String raw) {
     var value = raw.trim();
@@ -19,7 +24,9 @@ class ResolverUrl {
   }
 
   static bool isAllowed(String raw) {
-    final uri = Uri.tryParse(normalize(raw));
+    final normalized = normalize(raw);
+    if (normalized.isEmpty) return true;
+    final uri = Uri.tryParse(normalized);
     if (uri == null || uri.host.isEmpty) return false;
     if (uri.scheme == 'https') return true;
     if (uri.scheme != 'http') return false;
@@ -47,6 +54,8 @@ class ResolverUrl {
 
   static List<String> candidates(String preferred) {
     final first = normalize(preferred);
+    if (first.isEmpty) return const [];
+
     final out = <String>[];
     if (isAllowed(first)) out.add(first);
     for (final item in fallbacks) {
