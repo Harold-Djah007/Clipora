@@ -4,6 +4,7 @@ from app.schemas.download import DownloadRequest
 from app.services.download_service import create_job, get_job
 from app.services.session_store import session_store
 from app.services.threads_provider import provider
+from app.services.universal_provider import universal_provider
 
 router = APIRouter()
 
@@ -16,7 +17,7 @@ class ResolveRequest(BaseModel):
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": "threadvault", "version": "0.6.0"}
+    return {"ok": True, "service": "clipora", "version": "0.8.4-universal-foundation"}
 
 @router.post("/session/connect")
 def connect_session(body: SessionConnect, x_user_id: str = Header(default="local-user")):
@@ -32,11 +33,26 @@ def disconnect_session(x_user_id: str = Header(default="local-user")):
     session_store.delete(x_user_id)
     return {"connected": False, "deleted": True}
 
+@router.post("/detect")
+async def detect_platform(body: ResolveRequest):
+    try:
+        return await universal_provider.detect(body.url)
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 @router.post("/resolve")
 async def resolve(body: ResolveRequest, x_user_id: str = Header(default="local-user")):
+    """Legacy Threads resolver kept for compatibility with the existing app/tests."""
     try:
         post = await provider.resolve(body.url, session_store.get(x_user_id))
         return post
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+@router.post("/resolve/universal")
+async def resolve_universal(body: ResolveRequest, x_user_id: str = Header(default="local-user")):
+    try:
+        return await universal_provider.resolve(body.url, session_store.get(x_user_id))
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
 
