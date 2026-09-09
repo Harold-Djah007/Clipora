@@ -26,6 +26,7 @@ class AppState extends ChangeNotifier {
   bool sessionConnected = false;
   bool busy = false;
   int activeJobs = 0;
+  int lastRunSaved = 0;
   String? status;
   bool lastRunHadErrors = false;
 
@@ -84,6 +85,7 @@ class AppState extends ChangeNotifier {
     activeJobs += 1;
     busy = activeJobs > 0;
     lastRunHadErrors = false;
+    lastRunSaved = 0;
     status = activeJobs > 1
         ? 'Added to Clipora queue: $activeJobs saves running…'
         : 'Clipora queue ready: ${urls.length} link${urls.length == 1 ? '' : 's'}…';
@@ -142,7 +144,8 @@ class AppState extends ChangeNotifier {
 
       history = await historyStore.load();
       lastRunHadErrors = failed > 0;
-      completedOk = failed == 0 && saved > 0;
+      lastRunSaved = saved;
+      completedOk = saved > 0;
       if (failed == 0) {
         status = 'Done: saved $saved media item${saved == 1 ? '' : 's'} to your Clipora folders';
       } else if (saved > 0) {
