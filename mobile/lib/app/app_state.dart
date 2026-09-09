@@ -25,6 +25,7 @@ class AppState extends ChangeNotifier {
   List<DownloadRecord> history = [];
   bool sessionConnected = false;
   bool busy = false;
+  int activeJobs = 0;
   String? status;
   bool lastRunHadErrors = false;
 
@@ -74,26 +75,33 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resolveAndDownload(
+  Future<bool> resolveAndDownload(
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
   }) async {
-    if (urls.isEmpty || busy) return;
-    busy = true;
+    if (urls.isEmpty) return false;
+
+    activeJobs += 1;
+    busy = activeJobs > 0;
     lastRunHadErrors = false;
-    status = 'Clipora queue ready: ${urls.length} link${urls.length == 1 ? '' : 's'}…';
+    status = activeJobs > 1
+        ? 'Added to Clipora queue: $activeJobs saves running…'
+        : 'Clipora queue ready: ${urls.length} link${urls.length == 1 ? '' : 's'}…';
     await PlatformServices.startDownloadService(message: status!);
     notifyListeners();
 
     var saved = 0;
     var failed = 0;
     final errors = <String>[];
+    var completedOk = false;
 
     try {
       for (var postIndex = 0; postIndex < urls.length; postIndex++) {
         final url = urls[postIndex];
         final platform = UniversalPlatformDetector.detect(url);
-        status = 'Checking link ${postIndex + 1} of ${urls.length}…';
+        status = activeJobs > 1
+            ? 'Saving link ${postIndex + 1} of ${urls.length} • $activeJobs active saves…'
+            : 'Checking link ${postIndex + 1} of ${urls.length}…';
         await PlatformServices.updateDownloadService(message: status!);
         notifyListeners();
 
@@ -110,7 +118,9 @@ class AppState extends ChangeNotifier {
             post,
             settings,
             onProgress: (c, total) {
-              status = 'Saving $c of $total ${platform.label} item${total == 1 ? '' : 's'} from link ${postIndex + 1}…';
+              status = activeJobs > 1
+                  ? 'Saving $c of $total ${platform.label} item${total == 1 ? '' : 's'} • $activeJobs active saves…'
+                  : 'Saving $c of $total ${platform.label} item${total == 1 ? '' : 's'} from link ${postIndex + 1}…';
               unawaited(PlatformServices.updateDownloadService(message: status!));
               notifyListeners();
             },
@@ -132,6 +142,7 @@ class AppState extends ChangeNotifier {
 
       history = await historyStore.load();
       lastRunHadErrors = failed > 0;
+      completedOk = failed == 0 && saved > 0;
       if (failed == 0) {
         status = 'Done: saved $saved media item${saved == 1 ? '' : 's'} to your Clipora folders';
       } else if (saved > 0) {
@@ -139,9 +150,21 @@ class AppState extends ChangeNotifier {
       } else {
         status = 'Download failed: ${errors.isEmpty ? 'No media could be saved.' : errors.first}';
       }
+
+      await PlatformServices.showDownloadComplete(
+        title: completedOk ? 'Clipora saved media' : 'Clipora finished with errors',
+        message: status!,
+        success: completedOk,
+      );
+      return completedOk;
     } finally {
-      await PlatformServices.stopDownloadService();
-      busy = false;
+      activeJobs = activeJobs > 0 ? activeJobs - 1 : 0;
+      busy = activeJobs > 0;
+      if (busy) {
+        await PlatformServices.updateDownloadService(message: '$activeJobs Clipora save${activeJobs == 1 ? '' : 's'} still running…');
+      } else {
+        await PlatformServices.stopDownloadService();
+      }
       notifyListeners();
     }
   }
@@ -152,7 +175,7 @@ class AppState extends ChangeNotifier {
     Future<String> Function(String url) sourceLoader,
   ) async {
     if (platform.isThreads) {
-      status = 'Opening Threads Smart Capture for private-safe resolving…';
+      status = 'Capturing Threads media quietly in the background…';
       await PlatformServices.updateDownloadService(message: status!);
       notifyListeners();
       final source = await sourceLoader(url);
@@ -167,7 +190,7 @@ class AppState extends ChangeNotifier {
       return await universalResolver.resolve(url);
     } catch (error) {
       if (!platform.usesCaptureFallback) rethrow;
-      status = 'Backend could not resolve ${platform.label}. Opening Smart Capture…';
+      status = 'Backend could not resolve ${platform.label}. Capturing quietly in the background…';
       await PlatformServices.updateDownloadService(message: status!);
       notifyListeners();
       final source = await sourceLoader(url);
