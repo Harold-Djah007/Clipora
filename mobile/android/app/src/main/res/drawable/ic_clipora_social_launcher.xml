@@ -4,107 +4,27 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#050914"
+        android:fillColor="#07111F"
         android:pathData="M18,8 L90,8 Q100,8 100,18 L100,90 Q100,100 90,100 L18,100 Q8,100 8,90 L8,18 Q8,8 18,8 Z" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#00F2EA"
-        android:strokeWidth="1.6"
+        android:strokeWidth="11"
         android:strokeLineCap="round"
-        android:pathData="M18,8 L90,8 Q100,8 100,18 L100,90 Q100,100 90,100 L18,100 Q8,100 8,90 L8,18 Q8,8 18,8 Z" />
-
-    <!-- Braided rope threads forming the Clipora C. -->
+        android:pathData="M78,32 C66,18 40,18 29,34 C17,51 20,76 40,87 C55,95 74,90 83,76" />
     <path
         android:fillColor="#00000000"
-        android:strokeColor="#050914"
-        android:strokeWidth="24"
+        android:strokeColor="#FF0050"
+        android:strokeWidth="7"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M79,28 C66,15 39,15 27,33 C13,53 20,81 43,91 C59,98 79,91 88,73" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#00F2EA"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M78,27 C66,16 41,16 29,33 C16,52 22,79 44,88 C59,94 77,88 86,72" />
+        android:pathData="M76,35 C65,22 42,22 32,37 C21,52 24,74 42,84 C55,91 72,87 80,75" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#1877F2"
-        android:strokeWidth="6"
+        android:strokeWidth="4.5"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M77,31 C65,20 43,20 32,36 C20,53 25,76 45,84 C59,90 74,85 82,71" />
+        android:pathData="M74,38 C64,26 44,26 35,39 C25,53 28,72 44,81 C55,87 70,84 78,74" />
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M76,35 C65,24 45,24 35,38 C24,54 29,73 46,81 C58,86 72,82 79,70" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#111827"
-        android:strokeWidth="5.4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M80,38 C69,27 47,26 38,40 C28,55 32,72 48,78 C59,83 70,79 77,69" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FF0050"
-        android:strokeWidth="5.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M74,30 C62,18 39,22 30,39 C20,57 28,78 48,86 C62,91 79,84 86,69" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FF7A18"
-        android:strokeWidth="5.2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M73,26 C58,19 36,27 29,43 C22,61 34,80 51,85 C65,89 79,82 86,68" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFD21E"
-        android:strokeWidth="4.8"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M72,24 C55,18 35,31 30,47 C25,64 37,78 53,82 C66,85 78,80 84,68" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#B026FF"
-        android:strokeWidth="4.8"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M81,33 C69,18 41,18 29,36 C17,54 25,82 47,89 C62,94 80,86 88,72" />
-
-    <!-- Rope-fiber highlight strokes. -->
-    <path android:fillColor="#00000000" android:strokeColor="#B3FFFFFF" android:strokeWidth="1.1" android:strokeLineCap="round" android:pathData="M32,35 L39,41 M28,47 L36,53 M30,60 L39,66 M38,74 L48,78 M54,84 L65,83 M73,78 L82,70 M71,30 L79,37" />
-    <path android:fillColor="#00000000" android:strokeColor="#66000000" android:strokeWidth="1.1" android:strokeLineCap="round" android:pathData="M39,29 L47,36 M35,42 L43,49 M35,55 L44,61 M44,70 L54,75 M62,80 L72,77 M76,67 L84,60" />
-
-    <!-- Play knot in the open C. -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#050914"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M49,41 L49,67 L73,54 Z" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#00F2EA"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M49,42 L49,66 L72,54 Z" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FF0050"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M53,45 L53,63 L69,54 Z" />
-    <path
-        android:fillColor="#FFD21E"
-        android:pathData="M56,48 L56,60 L67,54 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,40 L46,68 L72,54 Z" />
 </vector>
