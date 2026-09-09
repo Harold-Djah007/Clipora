@@ -24,7 +24,6 @@ class DownloadManager {
       'Accept': '*/*',
       'Accept-Encoding': 'identity',
       'Connection': 'keep-alive',
-      'Referer': 'https://www.threads.com/',
     },
   ));
   final HistoryStore historyStore;
@@ -105,8 +104,8 @@ class DownloadManager {
     try {
       final uri = Uri.tryParse(item.url);
       debugPrint('[Clipora] download $index/$total ${item.kind.name} host=${uri?.host ?? 'unknown'}');
-      if (!_isSafePostMediaUrl(item.url)) {
-        throw StateError('Skipped a non-post Threads page asset. No unrelated PNG/audio was saved.');
+      if (!_isSafePostMediaUrl(item.url, post.sourceUrl)) {
+        throw StateError('Skipped a page asset, audio-only file, HLS stream, or unsupported media URL.');
       }
 
       final temp = File('$path.part');
@@ -127,13 +126,13 @@ class DownloadManager {
 
       final detected = await _detectMediaKind(temp);
       if (detected == null) {
-        throw const FileSystemException('Threads returned an unsupported file instead of post media.');
+        throw const FileSystemException('The server returned an unsupported file instead of media.');
       }
       if (item.kind == MediaKind.video && detected != _DetectedMediaKind.video) {
-        throw const FileSystemException('Expected a Threads video but the server returned an image/audio/static asset.');
+        throw const FileSystemException('Expected a video but the server returned an image/audio/static asset.');
       }
       if (item.kind == MediaKind.image && detected != _DetectedMediaKind.image) {
-        throw const FileSystemException('Expected a Threads image but the server returned another file type.');
+        throw const FileSystemException('Expected an image but the server returned another file type.');
       }
 
       await temp.rename(path);
@@ -178,19 +177,51 @@ class DownloadManager {
     return '$folder/${base}_${DateTime.now().millisecondsSinceEpoch}.$ext';
   }
 
-  bool _isSafePostMediaUrl(String raw) {
+  bool _isSafePostMediaUrl(String raw, String sourceUrl) {
     final uri = Uri.tryParse(raw);
     if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) return false;
     final lower = raw.toLowerCase();
     final host = uri.host.toLowerCase();
-    if (host == 'static.cdninstagram.com') return false;
-    if (lower.contains('/rsrc.php/') || lower.contains('/static/')) return false;
-    if (lower.contains('sprite') || lower.contains('favicon')) return false;
-    if (lower.contains('mime_type=audio') || lower.contains('/audio/')) return false;
+
+    if (_looksLikePageAsset(host, lower)) return false;
+    if (_looksLikeAudio(lower)) return false;
+    if (lower.contains('.m3u8') || lower.contains('m3u8')) return false;
+
+    if (_isThreadsSource(sourceUrl)) {
+      return _isStrictThreadsMediaUrl(host, lower);
+    }
+
+    // Universal links come from the backend resolver, then the downloaded bytes are
+    // verified before publishing. This keeps TikTok/X/Facebook/etc. working without
+    // weakening the old strict Threads guard that stopped wrong PNG/audio downloads.
+    return true;
+  }
+
+  bool _isThreadsSource(String raw) {
+    final uri = Uri.tryParse(raw);
+    final host = uri?.host.toLowerCase() ?? '';
+    return host.contains('threads.com') || host.contains('threads.net');
+  }
+
+  bool _isStrictThreadsMediaUrl(String host, String lower) {
     final goodHost = host.contains('cdninstagram.com') || host.contains('fbcdn.net');
     if (!goodHost) return false;
     if (lower.contains('.mp4') || lower.contains('mime_type=video')) return true;
     if (lower.contains('.jpg') || lower.contains('.jpeg') || lower.contains('.png') || lower.contains('.webp')) return true;
+    return false;
+  }
+
+  bool _looksLikePageAsset(String host, String lower) {
+    if (host == 'static.cdninstagram.com') return true;
+    if (lower.contains('/rsrc.php/') || lower.contains('/static/')) return true;
+    if (lower.contains('sprite') || lower.contains('favicon')) return true;
+    if (lower.endsWith('.css') || lower.endsWith('.js') || lower.endsWith('.svg')) return true;
+    return false;
+  }
+
+  bool _looksLikeAudio(String lower) {
+    if (lower.contains('mime_type=audio') || lower.contains('/audio/')) return true;
+    if (lower.endsWith('.m4a') || lower.endsWith('.mp3') || lower.endsWith('.aac') || lower.endsWith('.ogg') || lower.endsWith('.wav')) return true;
     return false;
   }
 
@@ -262,8 +293,8 @@ class DownloadManager {
   String _friendlyError(Object error) {
     if (error is DioException) {
       final code = error.response?.statusCode;
-      if (code == 403) return 'Threads media link expired or access was denied. Retry the post to refresh the link.';
-      if (code == 404) return 'Threads media is no longer available.';
+      if (code == 403) return 'Media link expired or access was denied. Retry the post to refresh the link.';
+      if (code == 404) return 'Media is no longer available.';
       if (code != null) return 'Download server returned HTTP $code.';
       return 'Network download failed: ${error.message ?? error.type.name}';
     }
