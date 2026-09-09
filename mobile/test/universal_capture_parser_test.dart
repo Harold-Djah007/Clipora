@@ -37,6 +37,58 @@ void main() {
     expect(post.media.single.url, contains('video.mp4'));
   });
 
+  test('field mode keeps multiple runtime videos from one carousel', () {
+    final platform = UniversalPlatformDetector.detect('https://www.tiktok.com/@creator/video/123');
+    final source = jsonEncode({
+      'html': '<html><video></video></html>',
+      'pageUrl': 'https://www.tiktok.com/@creator/video/123',
+      'hasVideo': true,
+      'runtimeMedia': [
+        {
+          'kind': 'video',
+          'url': 'https://v16-webapp-prime.tiktok.com/video/tos/useast2a/clip-a/?mime=video_mp4',
+          'width': 720,
+          'height': 1280,
+        },
+        {
+          'kind': 'video',
+          'url': 'https://v16-webapp-prime.tiktok.com/video/tos/useast2a/clip-b/?mime=video_mp4',
+          'width': 1080,
+          'height': 1920,
+        },
+      ],
+    });
+
+    final post = UniversalCaptureParser().parse(source, 'https://www.tiktok.com/@creator/video/123', platform);
+
+    expect(post.media, hasLength(2));
+    expect(post.media.map((item) => item.url), containsAll(['https://v16-webapp-prime.tiktok.com/video/tos/useast2a/clip-a/?mime=video_mp4', 'https://v16-webapp-prime.tiktok.com/video/tos/useast2a/clip-b/?mime=video_mp4']));
+  });
+
+  test('field mode caps captured carousel media at twenty items', () {
+    final platform = UniversalPlatformDetector.detect('https://x.com/creator/status/123');
+    final source = jsonEncode({
+      'html': '<html><video></video></html>',
+      'pageUrl': 'https://x.com/creator/status/123',
+      'hasVideo': true,
+      'runtimeMedia': [
+        for (var i = 0; i < 25; i++)
+          {
+            'kind': 'video',
+            'url': 'https://video.twimg.com/ext_tw_video/$i/pu/vid/720x1280/clip-$i.mp4',
+            'width': 720,
+            'height': 1280,
+          }
+      ],
+    });
+
+    final post = UniversalCaptureParser().parse(source, 'https://x.com/creator/status/123', platform);
+
+    expect(post.media, hasLength(20));
+    expect(post.media.first.url, contains('clip-0.mp4'));
+    expect(post.media.last.url, contains('clip-19.mp4'));
+  });
+
   test('does not save a poster when capture says the page is a video', () {
     final platform = UniversalPlatformDetector.detect('https://www.instagram.com/reel/Dc-Of-yuCCq/');
     final source = jsonEncode({
