@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.workspace_premium_rounded, title: 'About Clipora', subtitle: 'Version 0.8.1 • video-safe share resolver'),
+              _PanelTitle(icon: Icons.workspace_premium_rounded, title: 'About Clipora', subtitle: 'Version 0.8.4 • universal-social brand'),
               SizedBox(height: 12),
               Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass Threads access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),
