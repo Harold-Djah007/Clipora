@@ -128,10 +128,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       url: url,
       completer: Completer<String>(),
     );
-    request.timeout = Timer(const Duration(seconds: 32), () {
+    request.timeout = Timer(const Duration(seconds: 36), () {
       _completeCapture(
         request,
-        error: StateError('Background capture timed out. Open the post once in Private Access, make sure it plays, then retry.'),
+        error: StateError('Field capture timed out before the page exposed real media. Open the post once in Access, let it play, then retry.'),
       );
     });
     _captureQueue.add(request);
@@ -153,13 +153,19 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       if (source != null && source.isNotEmpty) {
         request.completer.complete(source);
       } else {
-        request.completer.completeError(error ?? StateError('Background capture ended before media was found.'));
+        request.completer.completeError(error ?? StateError('Field capture ended before media was found.'));
       }
     }
 
     if (!mounted) return;
     setState(() => _activeCapture = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => _pumpCaptureQueue());
+  }
+
+  void _completeActiveCapture({String? source, Object? error}) {
+    final request = _activeCapture;
+    if (request == null) return;
+    _completeCapture(request, source: source, error: error);
   }
 
   void _flashDoneBurst() {
@@ -176,6 +182,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
     final urls = _extractUrls(controller.text);
     final matches = UniversalPlatformDetector.detectAll(urls);
     final recent = app.history.take(3).toList();
+    final hasBackend = app.universalResolver.hasConfiguredBackend;
 
     return CliporaPage(
       child: Stack(
@@ -186,7 +193,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
               children: [
                 CliporaSectionTitle(
                   title: 'Save',
-                  subtitle: 'Paste any supported social link. Clipora resolves and captures quietly, then saves to Gallery.',
+                  subtitle: 'Paste any supported social link. Field Mode captures on this phone and saves to Gallery.',
                   trailing: const ThreadVaultMark(size: 36, showGlow: false),
                 ),
                 const SizedBox(height: 20),
@@ -242,7 +249,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
-                          children: matches.map(_platformPill).toList(growable: false),
+                          children: matches.map((match) => _platformPill(match, hasBackend)).toList(growable: false),
                         ),
                       ],
                       const SizedBox(height: 14),
@@ -270,13 +277,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
                 const SizedBox(height: 20),
                 const Text('How it works', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 const SizedBox(height: 10),
-                const PremiumCard(
+                PremiumCard(
                   child: Column(
                     children: [
-                      _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
-                      _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
-                      _Step(n: '3', text: 'Threads, Instagram, and Facebook capture quietly in the background when needed.'),
-                      _Step(n: '4', text: 'The file is validated, saved to Gallery, the link box clears, and Clipora notifies you when finished.'),
+                      const _Step(n: '1', text: 'Copy a social link, or share the post to Clipora from TikTok, X, YouTube, and the rest.'),
+                      _Step(
+                        n: '2',
+                        text: hasBackend
+                            ? 'Clipora tries your optional resolver first, then falls back to Field Mode capture on this phone.'
+                            : 'Clipora runs in Field Mode: it detects the platform and captures media on this phone without a PC/server.',
+                      ),
+                      const _Step(n: '3', text: 'The hidden capture viewport watches videos, images, and page network resources so carousels can keep every real item it sees.'),
+                      const _Step(n: '4', text: 'The file is validated, saved to Gallery, the link box clears, and Clipora notifies you when finished.'),
                     ],
                   ),
                 ),
@@ -304,16 +316,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
             Positioned(
               left: 0,
               top: 0,
-              width: 1,
-              height: 1,
+              width: MediaQuery.sizeOf(context).width,
+              height: MediaQuery.sizeOf(context).height * .78,
               child: Opacity(
                 opacity: 0.01,
                 child: IgnorePointer(
                   child: _HiddenCaptureHost(
                     key: ValueKey(_activeCapture!.id),
                     url: _activeCapture!.url,
-                    onComplete: (source) => _completeCapture(_activeCapture!, source: source),
-                    onFailed: (error) => _completeCapture(_activeCapture!, error: error),
+                    onComplete: (source) => _completeActiveCapture(source: source),
+                    onFailed: (error) => _completeActiveCapture(error: error),
                   ),
                 ),
               ),
@@ -327,17 +339,21 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _platformPill(PlatformMatch match) {
+  Widget _platformPill(PlatformMatch match, bool hasBackend) {
+    final value = !hasBackend
+        ? 'field mode'
+        : match.isThreads
+            ? 'field mode'
+            : match.usesCaptureFallback
+                ? 'resolver+field'
+                : match.preferBackend
+                    ? 'resolver boost'
+                    : 'field mode';
+
     return CliporaPill(
       icon: match.icon,
       label: match.label,
-      value: match.isThreads
-          ? 'quiet capture'
-          : match.usesCaptureFallback
-              ? 'backend+'
-              : match.preferBackend
-                  ? 'backend'
-                  : 'check',
+      value: value,
       color: match.accent,
     );
   }
@@ -530,6 +546,23 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
     (function() {
       function abs(u) { try { return new URL(u, location.href).href; } catch (e) { return u; } }
       const runtime = [];
+      const seen = new Set();
+      function push(kind, u, w, h) {
+        if (!u) return;
+        const url = abs(u);
+        const key = kind + ':' + url;
+        if (seen.has(key)) return;
+        seen.add(key);
+        runtime.push({kind: kind, url: url, width: w || null, height: h || null});
+      }
+      function classifyResource(u, initiator) {
+        const lower = (u || '').toLowerCase();
+        const type = (initiator || '').toLowerCase();
+        if (!lower || lower.indexOf('http') !== 0) return null;
+        if (type === 'video' || lower.includes('.mp4') || lower.includes('mime=video') || lower.includes('mime_type=video') || lower.includes('video/mp4') || lower.includes('video_mp4') || lower.includes('/video/')) return 'video';
+        if (type === 'img' || lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') || lower.includes('.webp')) return 'image';
+        return null;
+      }
       document.querySelectorAll('video').forEach(function(v) {
         try {
           v.muted = true;
@@ -539,16 +572,24 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
           const attempt = v.play();
           if (attempt && attempt.catch) attempt.catch(function() {});
         } catch (e) {}
-        const urls = [v.currentSrc, v.src];
+        const urls = [v.currentSrc, v.src, v.poster];
         v.querySelectorAll('source').forEach(function(s) { urls.push(s.src); });
         urls.forEach(function(u) {
-          if (u) runtime.push({kind:'video', url: abs(u), width: v.videoWidth || null, height: v.videoHeight || null});
+          if (!u) return;
+          const kind = classifyResource(u, 'video') || (String(u).toLowerCase().match(/\.(jpe?g|png|webp)/) ? 'image' : 'video');
+          push(kind, u, v.videoWidth || null, v.videoHeight || null);
         });
       });
       document.querySelectorAll('img').forEach(function(img) {
         const u = img.currentSrc || img.src;
-        if (u && img.naturalWidth > 240) runtime.push({kind:'image', url: abs(u), width: img.naturalWidth, height: img.naturalHeight});
+        if (u && img.naturalWidth > 240) push('image', u, img.naturalWidth, img.naturalHeight);
       });
+      try {
+        performance.getEntriesByType('resource').forEach(function(entry) {
+          const kind = classifyResource(entry.name || '', entry.initiatorType || '');
+          if (kind) push(kind, entry.name, null, null);
+        });
+      } catch (e) {}
       const canonical = document.querySelector('link[rel="canonical"]');
       return JSON.stringify({
         html: document.documentElement ? document.documentElement.outerHTML : '',
@@ -556,7 +597,7 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         canonicalUrl: canonical ? canonical.href : location.href,
         runtimeMedia: runtime,
         hasVideo: runtime.some(function(x){ return x.kind === 'video'; }) || !!document.querySelector('video'),
-        captureMode: 'auto'
+        captureMode: 'field'
       });
     })();
   ''';
@@ -564,12 +605,12 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
   @override
   void initState() {
     super.initState();
-    _timeout = Timer(const Duration(seconds: 30), () {
+    _timeout = Timer(const Duration(seconds: 34), () {
       if (_done) return;
       if (_lastSource != null && _lastSource!.isNotEmpty) {
         _finish(_lastSource!);
       } else {
-        _fail(StateError('Background capture timed out before the page exposed media.'));
+        _fail(StateError('Field capture timed out before the page exposed media.'));
       }
     });
   }
@@ -591,6 +632,11 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
           source.contains('"kind":"video"') ||
           source.contains('video_versions') ||
           source.contains('playable_url') ||
+          source.contains('playback_url') ||
+          source.contains('mime=video') ||
+          source.contains('mime_type=video') ||
+          source.contains('video_mp4') ||
+          source.contains('/video/') ||
           source.contains('cdninstagram') ||
           source.contains('fbcdn');
       if (ready || finalAttempt) _finish(source);
@@ -630,10 +676,15 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         allowsInlineMediaPlayback: true,
       ),
       onWebViewCreated: (c) => _controller = c,
+      onProgressChanged: (_, progress) {
+        if (progress > 35 && !_done) {
+          unawaited(_capture(finalAttempt: progress >= 100));
+        }
+      },
       onLoadStop: (_, __) async {
-        for (var i = 0; i < 16 && !_done; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 700));
-          await _capture(finalAttempt: i == 15);
+        for (var i = 0; i < 22 && !_done; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 550));
+          await _capture(finalAttempt: i == 21);
         }
       },
     );
