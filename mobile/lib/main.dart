@@ -7,6 +7,7 @@ import 'features/downloads/downloads_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/session/session_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'widgets/clipora_rope_logo.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -133,7 +134,7 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 2400), () {
+    Timer(const Duration(milliseconds: 3600), () {
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -162,7 +163,7 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..forward();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 3300))..forward();
   }
 
   @override
@@ -175,58 +176,7 @@ class _CliporaLaunchScreenState extends State<CliporaLaunchScreen> with SingleTi
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF020716),
-      body: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          final p = Curves.easeInOutCubic.transform(_controller.value);
-          final textOpacity = ((p - .62) / .28).clamp(0.0, 1.0).toDouble();
-          final scale = .94 + (.06 * Curves.easeOutCubic.transform(p));
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: CustomPaint(painter: _SocialThreadInflowPainter(progress: p)),
-              ),
-              Center(
-                child: Transform.scale(
-                  scale: scale,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 168,
-                        height: 168,
-                        child: CustomPaint(painter: _CliporaMarkPainter(progress: p)),
-                      ),
-                      const SizedBox(height: 22),
-                      Opacity(
-                        opacity: textOpacity,
-                        child: const Column(
-                          children: [
-                            Text(
-                              'Clipora',
-                              style: TextStyle(fontSize: 36, height: 1, fontWeight: FontWeight.w900, letterSpacing: -1.2),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'save • share • keep',
-                              style: TextStyle(
-                                color: Color(0x99FFFFFF),
-                                fontSize: 12,
-                                letterSpacing: 3.2,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+      body: CliporaRopeLaunchAnimation(animation: _controller),
     );
   }
 }
