@@ -4,6 +4,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 import '../../app/app_state.dart';
 import '../../models/media_models.dart';
+import '../../services/universal_platform_detector.dart';
 import '../../widgets/premium_card.dart';
 import '../../widgets/threadvault_mark.dart';
 
@@ -69,6 +70,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       );
       return;
     }
+
     await context.read<AppState>().resolveAndDownload(
       urls,
       sourceLoader: (url) async {
@@ -87,6 +89,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final urls = _extractUrls(controller.text);
+    final matches = UniversalPlatformDetector.detectAll(urls);
     final recent = app.history.take(3).toList();
 
     return CliporaPage(
@@ -95,7 +98,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
         children: [
           CliporaSectionTitle(
             title: 'Save',
-            subtitle: 'Paste a link. Clipora captures the media and puts it in your gallery.',
+            subtitle: 'Paste any supported social link. Clipora uses the universal backend first, then private-safe Threads capture when needed.',
             trailing: const ThreadVaultMark(size: 36, showGlow: false),
           ),
           const SizedBox(height: 20),
@@ -124,7 +127,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
                   maxLines: 5,
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
-                    hintText: 'https://www.threads.com/…',
+                    hintText: 'TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, Threads…',
                     prefixIcon: const Icon(Icons.link_rounded),
                     suffixIcon: controller.text.isEmpty
                         ? IconButton(
@@ -142,10 +145,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
                 const SizedBox(height: 12),
                 Text(
                   urls.isEmpty
-                      ? 'Supports public and share links. Private Threads posts use your signed-in session.'
+                      ? 'Supported: ${UniversalPlatformDetector.supportedLabel}. Keep the backend open for non-Threads links.'
                       : '${urls.length} link${urls.length == 1 ? '' : 's'} ready',
                   style: const TextStyle(color: Colors.white54, fontSize: 12.5, height: 1.35),
                 ),
+                if (matches.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: matches.map(_platformPill).toList(growable: false),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 CliporaPrimaryButton(
                   onPressed: app.busy ? null : _save,
@@ -181,9 +192,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
           const PremiumCard(
             child: Column(
               children: [
-                _Step(n: '1', text: 'Copy a post or share link.'),
-                _Step(n: '2', text: 'Clipora reads the clipboard and opens capture if needed.'),
-                _Step(n: '3', text: 'The file is saved to Gallery. Private posts stay behind your own login.'),
+                _Step(n: '1', text: 'Copy a social media post, video, reel, short, pin, or public story link.'),
+                _Step(n: '2', text: 'Clipora detects the platform and calls the universal backend for direct media.'),
+                _Step(n: '3', text: 'Threads/private-safe flows use local capture so Clipora never asks for your password.'),
+                _Step(n: '4', text: 'The file is validated, saved, and published to your Gallery.'),
               ],
             ),
           ),
@@ -206,6 +218,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
           ],
         ],
       ),
+    );
+  }
+
+  Widget _platformPill(PlatformMatch match) {
+    return CliporaPill(
+      icon: match.icon,
+      label: match.label,
+      value: match.isThreads ? 'capture' : match.preferBackend ? 'backend' : 'check',
+      color: match.accent,
     );
   }
 }
