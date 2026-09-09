@@ -28,6 +28,7 @@ class DownloadManager {
     },
   ));
   final HistoryStore historyStore;
+  Future<void> _historyWrite = Future<void>.value();
 
   DownloadManager(this.historyStore);
 
@@ -43,7 +44,6 @@ class DownloadManager {
     final root = await getApplicationDocumentsDirectory();
     final folder = Directory('${root.path}/Clipora');
     await folder.create(recursive: true);
-    final records = await historyStore.load();
     final created = List<DownloadRecord?>.filled(post.media.length, null);
     final total = post.media.length;
     if (total == 0) return const [];
@@ -65,8 +65,7 @@ class DownloadManager {
           settings: settings,
         );
         created[i] = record;
-        records.insert(0, record);
-        await historyStore.save(records);
+        await _appendRecord(record);
         completed += 1;
         onProgress?.call(completed, total);
       }
@@ -74,6 +73,16 @@ class DownloadManager {
 
     await Future.wait(List.generate(concurrency, (_) => worker()));
     return created.whereType<DownloadRecord>().toList(growable: false);
+  }
+
+  Future<void> _appendRecord(DownloadRecord record) {
+    final next = _historyWrite.then((_) async {
+      final records = await historyStore.load();
+      records.insert(0, record);
+      await historyStore.save(records);
+    });
+    _historyWrite = next.then<void>((_) {}, onError: (_, __) {});
+    return next;
   }
 
   Future<DownloadRecord> _downloadOne({
