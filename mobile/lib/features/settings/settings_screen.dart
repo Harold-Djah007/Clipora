@@ -40,24 +40,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _update(AppSettings s) => context.read<AppState>().setSettings(s);
 
   Future<bool> _saveResolver() async {
-    final raw = resolver.text.trim().isEmpty ? ResolverUrl.defaultValue : resolver.text.trim();
+    final raw = resolver.text.trim();
+    if (raw.isEmpty) {
+      await _update(context.read<AppState>().settings.copyWith(resolverUrl: ''));
+      setState(() => resolverStatus = 'Field Mode saved: no PC/server is required. Clipora will use on-device Smart Capture.');
+      return true;
+    }
+
     if (!ResolverUrl.isAllowed(raw)) {
-      setState(() => resolverStatus = 'Use http://127.0.0.1:8010, http://10.0.2.2:8010, or your PC LAN IP such as http://192.168.1.10:8010.');
+      setState(() => resolverStatus = 'Use HTTPS for a hosted backend, or a private LAN/USB URL such as http://192.168.1.10:8010 or http://127.0.0.1:8010. Leave blank for Field Mode.');
       return false;
     }
     final value = ResolverUrl.normalize(raw);
     resolver.text = value;
     await _update(context.read<AppState>().settings.copyWith(resolverUrl: value));
-    setState(() => resolverStatus = 'Saved $value');
+    setState(() => resolverStatus = 'Optional backend saved: $value');
     return true;
   }
 
   Future<void> _testResolver() async {
     final saved = await _saveResolver();
     if (!saved || !mounted) return;
+    final configured = context.read<AppState>().settings.resolverUrl.trim().isNotEmpty;
+    if (!configured) {
+      setState(() => resolverStatus = 'Field Mode is active. You can sell/test the app without starting backend servers.');
+      return;
+    }
+
     setState(() {
       resolverBusy = true;
-      resolverStatus = 'Checking backend…';
+      resolverStatus = 'Checking optional backend…';
     });
     try {
       final base = await context.read<AppState>().universalResolver.ping();
@@ -76,7 +88,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final state = context.watch<AppState>();
     final s = state.settings;
     if (filename.text.isEmpty) filename.text = s.filenameTemplate;
-    if (resolver.text.isEmpty) resolver.text = s.resolverUrl;
 
     return CliporaPage(
       child: ListView(
@@ -84,7 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const CliporaSectionTitle(
             title: 'Settings',
-            subtitle: 'Resolver, downloads, filenames, and session privacy',
+            subtitle: 'Field Mode, optional resolver, downloads, filenames, and session privacy',
           ),
           const SizedBox(height: 18),
           CliporaHeroCard(
@@ -105,17 +116,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             glow: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const _PanelTitle(
-                icon: Icons.dns_rounded,
-                title: 'Resolver',
-                subtitle: 'PC backend the phone uses for TikTok, X, YouTube, and the rest',
+                icon: Icons.phone_android_rounded,
+                title: 'Field Mode',
+                subtitle: 'Leave Resolver URL blank to run without a PC/server. Add an optional hosted/LAN backend only as a power boost.',
               ),
               const SizedBox(height: 14),
               TextField(
                 controller: resolver,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  labelText: 'Resolver URL',
-                  helperText: 'Same Wi-Fi: http://192.168.x.x:8010   USB: http://127.0.0.1:8010',
+                  labelText: 'Optional Resolver URL',
+                  helperText: 'Blank = no server. Optional: https://your-backend.app or http://192.168.x.x:8010',
                   prefixIcon: Icon(Icons.link_rounded),
                 ),
                 onSubmitted: (_) => _saveResolver(),
@@ -126,7 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: OutlinedButton.icon(
                     onPressed: resolverBusy ? null : _saveResolver,
                     icon: const Icon(Icons.save_outlined, size: 18),
-                    label: const Text('Save URL'),
+                    label: const Text('Save'),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -136,7 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: resolverBusy
                         ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.health_and_safety_outlined, size: 18),
-                    label: Text(resolverBusy ? 'Checking…' : 'Test'),
+                    label: Text(resolverBusy ? 'Checking…' : 'Check Mode'),
                   ),
                 ),
               ]),
@@ -231,9 +242,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.5'),
+              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.7 Field Mode'),
               SizedBox(height: 12),
-              Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass Threads access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
+              Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),
           ),
         ],
@@ -280,12 +291,12 @@ class _SwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile.adaptive(
-      contentPadding: EdgeInsets.zero,
-      secondary: Icon(icon, color: const Color(0xFF8BE9E0)),
+    return SwitchListTile(
       value: value,
       onChanged: onChanged,
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      contentPadding: EdgeInsets.zero,
+      secondary: Icon(icon, color: const Color(0xFF8BE9E0)),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54)),
     );
   }
