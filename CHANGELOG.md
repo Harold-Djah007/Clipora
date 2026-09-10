@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.3 Resolver-only non-Threads instant route
+- Stopped using the old on-phone WebView/Field Mode capture fallback for non-Threads platforms.
+- TikTok, Instagram, X/Twitter, Pinterest, Facebook, Snapchat, and YouTube now require the Clipora resolver route so they can behave like a paste-to-download app instead of opening/scanning web players inside the APK.
+- Threads remains on the existing local Smart Capture path as requested.
+- Updated the mobile version to 2.0.3+43.
+
 ## 2.0.2 Clipora Instant paste-to-download
 - Replaced the analyze-pick-save Studio flow with the simpler Pinget-style instant flow: paste/share link -> Clipora starts downloading automatically.
 - Kept a manual Download Now button only as a fallback/retry, not as a required step.
