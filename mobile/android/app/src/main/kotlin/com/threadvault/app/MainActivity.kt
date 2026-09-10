@@ -81,6 +81,14 @@ class MainActivity : FlutterActivity() {
                         result.error("SERVICE_FAILED", e.message ?: "Could not stop download service", null)
                     }
                 }
+                "returnToSourceApp" -> {
+                    try {
+                        moveTaskToBack(true)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("RETURN_FAILED", e.message ?: "Could not return to the previous app", null)
+                    }
+                }
                 "takeSharedUrl" -> {
                     val value = sharedUrl
                     sharedUrl = null
@@ -103,8 +111,16 @@ class MainActivity : FlutterActivity() {
             ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
             ?: intent.data?.toString()
         if (raw.isNullOrBlank()) return
-        val match = Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE).find(raw)
-        sharedUrl = (match?.value ?: raw).trim().trimEnd(',', '.', ';', ')')
+
+        val urls = Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
+            .findAll(raw)
+            .map { it.value.trim().trimEnd(',', '.', ';', ')') }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(20)
+            .toList()
+
+        sharedUrl = if (urls.isNotEmpty()) urls.joinToString("\n") else raw.trim()
     }
 
     private fun publishMedia(sourcePath: String, fileName: String, mimeType: String): String {
