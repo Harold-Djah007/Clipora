@@ -13,7 +13,6 @@ import android.os.Environment
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.MediaStore
-import com.threadvault.threadvault.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
