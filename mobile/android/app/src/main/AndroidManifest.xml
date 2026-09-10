@@ -57,9 +57,6 @@
             android:name="com.threadvault.app.InstantShareDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-        <meta-data
-            android:name="com.threadvault.app.CLIPORA_RESOLVER_URL"
-            android:value="${cliporaResolverUrl}" />
         <meta-data android:name="flutterEmbedding" android:value="2" />
     </application>
 </manifest>
