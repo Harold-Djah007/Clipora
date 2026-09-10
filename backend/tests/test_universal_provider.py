@@ -94,3 +94,14 @@ def test_resolve_caps_carousel_entries_at_twenty(monkeypatch):
     assert len(post.media) == 20
     assert post.media[0].url.endswith("clip-0.mp4")
     assert post.media[-1].url.endswith("clip-19.mp4")
+
+def test_tiktok_uses_extractor_managed_browser_fingerprint():
+    provider = UniversalProvider()
+
+    opts = provider._ydl_opts_for("https://vt.tiktok.com/example/")
+    headers = opts["http_headers"]
+
+    assert "User-Agent" not in headers
+    assert "Referer" not in headers
+    assert headers["Accept-Language"] == "en-US,en;q=0.9"
+
