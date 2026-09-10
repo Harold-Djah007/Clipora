@@ -24,7 +24,7 @@ class UniversalResolverService {
 
   Future<String> ping() async {
     if (baseUrls.isEmpty) {
-      throw StateError('Field Mode is active. No backend resolver is configured, so Clipora will use on-device Smart Capture.');
+      throw StateError('No Clipora resolver is configured. Add a hosted resolver URL or build with CLIPORA_RESOLVER_URL.');
     }
 
     Object? lastError;
@@ -42,9 +42,7 @@ class UniversalResolverService {
         lastError = error;
       }
     }
-    throw StateError(
-      'Optional backend is not reachable. Clipora can still run in Field Mode using on-device Smart Capture. Last error: ${_shortError(lastError)}',
-    );
+    throw StateError('Clipora resolver is not reachable. Last error: ${_shortError(lastError)}');
   }
 
   Future<ResolvedPost> resolve(String url) async {
@@ -53,7 +51,7 @@ class UniversalResolverService {
       throw StateError('Unsupported link. Clipora supports ${UniversalPlatformDetector.supportedLabel}.');
     }
     if (baseUrls.isEmpty) {
-      throw StateError('No optional backend resolver configured.');
+      throw StateError('No Clipora resolver is configured.');
     }
 
     Object? lastError;
@@ -75,9 +73,7 @@ class UniversalResolverService {
       }
     }
 
-    throw StateError(
-      'Optional backend is not reachable. Clipora can still run in Field Mode using on-device Smart Capture. Last error: ${_shortError(lastError)}',
-    );
+    throw StateError('Clipora resolver is not reachable. Last error: ${_shortError(lastError)}');
   }
 
   static ResolvedPost postFromJson(
