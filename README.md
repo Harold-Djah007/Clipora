@@ -1,95 +1,71 @@
 # Clipora
 
-Clipora is a premium social media saver focused on a stressless paste-link flow.
+Clipora is an Android social-media saver built around one quick flow:
 
-Current mobile baseline: **0.8.3 autopilot playback capture**.
-Current backend upgrade branch: **universal resolver foundation**.
+**Share a supported link → choose Clipora → return to the social app → download continues in the background.**
 
-## Current stable mobile behavior
+The mobile app never opens a social page to scrape or capture it. A Clipora resolver extracts the media and the Android app publishes completed videos to `Movies/Clipora`, photos to `Pictures/Clipora`, and optional captions to `Downloads/Clipora`.
 
-The mobile app handles Threads media that the signed-in user is already authorized to view. It saves real MP4 videos, photos, and carousels while rejecting poster images, page artwork, sprites, audio-only resources, and unrelated static assets.
+## Supported links
 
-### 0.8.3 mobile highlights
-
-- Smart Save: one tap tries hidden resolving first, then uses Smart Capture automatically without forcing Video/Post choices.
-- Autopilot playback: Smart Capture tries to start videos by itself using muted inline autoplay plus repeated play-control nudges.
-- Faster resolving: shorter hidden checks, faster canonical detection, and faster Smart Capture polling.
-- Video-safe media rules: video posts wait for real MP4 and do not fall back to low-quality poster JPG.
-- Photo/carousel support for real image-only posts.
-- Background foreground-service downloads, wake lock, Clipora folders, launch animation, and compact neon UI.
-
-## Universal downloader foundation
-
-Clipora is being upgraded from a Threads-focused saver into a universal social saver architecture.
-
-Target platforms:
-
-- Threads
 - TikTok
 - Instagram
+- Threads
 - X / Twitter
 - Pinterest
 - Facebook
 - Snapchat public/share links
-- YouTube/Shorts where supported
+- YouTube and Shorts where the resolver supports the media
 
-The backend now has a platform-detection layer and a `yt-dlp`-powered universal resolver foundation. Threads remains connected to the existing local-session-aware resolver so the working private-video flow does not regress.
+Clipora is for public media and content the user is authorized to save. It does not remove watermarks, collect platform passwords, or bypass private-account access controls.
 
-## Universal API endpoints
+## Local resolver (Windows)
 
-```text
-POST /api/detect
-POST /api/resolve/universal
-POST /api/downloads
-```
+Use Python 3.12 or 3.13:
 
-Example:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/detect \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://x.com/user/status/1234567890"}'
-```
-
-## Backend development
-
-```bash
+```powershell
 cd backend
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest -q
-uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File ".\scripts\start_api.ps1"
 ```
 
-On Windows PowerShell:
+Keep that terminal open. Verify it from a second terminal:
 
 ```powershell
-cd "C:\Users\A S U S\Desktop\Clipora\backend"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pytest -q
-uvicorn app.main:app --reload --port 8000
+Invoke-RestMethod "http://127.0.0.1:8010/health"
 ```
 
-## Mobile development
+## Android USB test build
 
 ```powershell
-cd "C:\Users\A S U S\Desktop\Clipora\mobile"
+& "C:\Android\Sdk\platform-tools\adb.exe" reverse --remove-all
+& "C:\Android\Sdk\platform-tools\adb.exe" reverse tcp:8010 tcp:8010
+
+cd mobile
 flutter clean
 flutter pub get
 flutter test
-flutter build apk --debug --no-pub
+flutter build apk --debug --no-pub --dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010
 & "C:\Android\Sdk\platform-tools\adb.exe" install -r "build\app\outputs\flutter-apk\app-debug.apk"
 ```
 
-## Storage
+The native share service receives the same `CLIPORA_RESOLVER_URL` that Flutter receives. For a customer-ready APK, replace localhost with a stable HTTPS resolver URL.
 
-- Videos: `Movies/Clipora`
-- Photos: `Pictures/Clipora`
-- Captions: `Downloads/Clipora`
+## Backend checks
 
-## Privacy and safety
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
-Clipora does not ask for, store, or handle platform passwords. Private/restricted media must only work through a local signed-in session for content the user is already allowed to view. Clipora preserves source/creator metadata and does not add its own watermark.
+API endpoints:
+
+- `GET /health` and `GET /api/health`
+- `POST /api/detect`
+- `POST /api/resolve/universal`
+- `GET /api/files/{token}` for temporary resolver-proxied media
+
+## Release note
+
+The repository's release build currently falls back to Android's debug signing key until a production keystore is configured. Configure production signing before Play Store or customer distribution.

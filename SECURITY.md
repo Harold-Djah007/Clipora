@@ -1,11 +1,9 @@
-# ThreadVault Security Notes
+# Clipora Security Notes
 
-- Do not collect Threads/Instagram passwords in app-owned forms.
-- Authenticate only on the official Threads web origin inside the embedded browser.
-- Keep private-session cookies on-device by default.
-- Never log cookie values, authorization headers, resolved private HTML, or signed CDN URLs.
-- Signed media URLs should be treated as short-lived secrets and used immediately.
-- Auto-delete should clear the WebView cookie jar and secure session metadata.
-- The optional backend session endpoint is intended for self-hosted/controlled deployments only and encrypts supplied session blobs at rest in memory; production deployments should use a persistent secret store and authentication.
-- Resolver inputs are restricted to HTTPS Threads hosts to reduce SSRF risk.
-- Private content must only be processed when the connected account is already allowed to view it.
+- Clipora accepts only supported `http`/`https` social links; unknown hosts are rejected before extraction.
+- The Android app does not open social login pages, collect passwords, or upload session cookies.
+- Hosted resolver URLs must use HTTPS. Cleartext HTTP is accepted only for localhost, emulator, and private LAN testing.
+- Resolved media URLs and temporary file tokens should be treated as short-lived data and must not be logged in production.
+- Private or restricted posts fail normally; Clipora does not bypass access controls.
+- Clipora does not include watermark-removal behavior.
+- Deploy the resolver behind normal TLS, authentication/rate limiting where appropriate, and routine dependency updates.

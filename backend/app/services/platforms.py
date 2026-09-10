@@ -77,7 +77,7 @@ def detect_platform(url: str) -> PlatformInfo:
                 platform=platform,
                 hostname=hostname,
                 normalized_url=url.strip(),
-                needs_local_session=platform in {Platform.THREADS, Platform.INSTAGRAM, Platform.FACEBOOK},
+                needs_local_session=False,
                 supports_server_resolve=platform not in {Platform.UNKNOWN},
             )
 

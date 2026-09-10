@@ -3,7 +3,7 @@ import 'package:threadvault/models/media_models.dart';
 import 'package:threadvault/services/universal_resolver_service.dart';
 
 void main() {
-  test('defaults to field mode when no backend is configured', () {
+  test('reports no backend when the APK and settings are blank', () {
     final service = UniversalResolverService();
 
     expect(service.hasConfiguredBackend, isFalse);
@@ -52,6 +52,22 @@ void main() {
     );
 
     expect(post.media.single.url, 'http://192.168.1.10:8010/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
+
+  test('preserves GIF media type from the resolver', () {
+    final post = UniversalResolverService.postFromJson(
+      {
+        'post_id': 'gif1',
+        'author': 'creator',
+        'media': [
+          {'media_type': 'image', 'mime_type': 'image/gif', 'url': 'https://cdn.example/animation.gif'},
+        ],
+      },
+      fallbackUrl: 'https://pin.it/example',
+    );
+
+    expect(post.media.single.kind, MediaKind.image);
+    expect(post.media.single.mimeType, 'image/gif');
   });
 
   test('rejects universal resolver JSON without media', () {

@@ -5,59 +5,41 @@ from app.core.version import API_SERVICE_NAME, API_VERSION
 from app.schemas.download import DownloadRequest
 from app.services.download_service import create_job, get_job
 from app.services.file_cache import media_file_cache
-from app.services.session_store import session_store
 from app.services.threads_provider import provider
 from app.services.universal_provider import universal_provider
+from app.services.resolver_errors import public_resolver_error
 
 router = APIRouter()
 
-class SessionConnect(BaseModel):
-    session_blob: str = Field(min_length=1, max_length=32768)
-    ttl_minutes: int = Field(default=60, ge=5, le=10080)
-
 class ResolveRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=8, max_length=4096)
 
 @router.get("/health")
 def health():
     return {"ok": True, "service": API_SERVICE_NAME, "version": API_VERSION}
-
-@router.post("/session/connect")
-def connect_session(body: SessionConnect, x_user_id: str = Header(default="local-user")):
-    session_store.put(x_user_id, body.session_blob, body.ttl_minutes)
-    return {"connected": True, "ttl_minutes": body.ttl_minutes}
-
-@router.get("/session/status")
-def session_status(x_user_id: str = Header(default="local-user")):
-    return {"connected": session_store.get(x_user_id) is not None}
-
-@router.post("/session/disconnect")
-def disconnect_session(x_user_id: str = Header(default="local-user")):
-    session_store.delete(x_user_id)
-    return {"connected": False, "deleted": True}
 
 @router.post("/detect")
 async def detect_platform(body: ResolveRequest):
     try:
         return await universal_provider.detect(body.url)
     except Exception as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(422, public_resolver_error(exc)) from exc
 
 @router.post("/resolve")
-async def resolve(body: ResolveRequest, x_user_id: str = Header(default="local-user")):
+async def resolve(body: ResolveRequest):
     """Legacy Threads resolver kept for compatibility with the existing app/tests."""
     try:
-        post = await provider.resolve(body.url, session_store.get(x_user_id))
+        post = await provider.resolve(body.url)
         return post
     except Exception as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(422, public_resolver_error(exc)) from exc
 
 @router.post("/resolve/universal")
-async def resolve_universal(body: ResolveRequest, x_user_id: str = Header(default="local-user")):
+async def resolve_universal(body: ResolveRequest):
     try:
-        return await universal_provider.resolve(body.url, session_store.get(x_user_id))
+        return await universal_provider.resolve(body.url)
     except Exception as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(422, public_resolver_error(exc)) from exc
 
 
 @router.get("/files/{token}")

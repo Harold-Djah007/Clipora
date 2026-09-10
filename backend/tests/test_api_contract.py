@@ -1,10 +1,10 @@
 from app.services.platforms import detect_platform
 
 
-def test_detect_contract_for_threads_session_hint():
+def test_detect_contract_for_public_threads_link():
     info = detect_platform("https://www.threads.com/@creator/post/ABC123")
     assert info.platform.value == "threads"
-    assert info.needs_local_session is True
+    assert info.needs_local_session is False
     assert info.supports_server_resolve is True
 
 

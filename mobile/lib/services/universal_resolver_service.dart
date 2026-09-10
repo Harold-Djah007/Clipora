@@ -136,14 +136,29 @@ class UniversalResolverService {
   }
 
   static String _extractBackendError(Object? data, int? statusCode) {
-    if (data is Map && data['detail'] != null) return data['detail'].toString();
-    if (data is String && data.trim().isNotEmpty) return data;
-    return 'Backend resolver returned HTTP ${statusCode ?? 'error'}.';
+    String text;
+    if (data is Map && data['detail'] != null) {
+      text = data['detail'].toString();
+    } else if (data is String && data.trim().isNotEmpty) {
+      text = data;
+    } else {
+      text = 'Backend resolver returned HTTP ${statusCode ?? 'error'}.';
+    }
+    return _cleanError(text);
   }
 
   static String _shortError(Object? error) {
     if (error == null) return 'unknown';
-    final text = error.toString();
+    final text = _cleanError(error.toString());
     return text.length > 140 ? '${text.substring(0, 140)}…' : text;
+  }
+
+  static String _cleanError(String raw) {
+    final text = raw
+        .replaceAll(RegExp(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceFirst(RegExp(r'^(?:ERROR:\s*)+', caseSensitive: false), '')
+        .trim();
+    return text.length <= 360 ? text : '${text.substring(0, 359).trimRight()}…';
   }
 }

@@ -27,9 +27,9 @@ class ResolvedPost:
 
 
 class ThreadsProvider:
-    """Resolver for content the supplied user session is already authorized to view."""
+    """Resolver for public Threads post pages."""
 
-    async def resolve(self, url: str, session_blob: Optional[str]) -> ResolvedPost:
+    async def resolve(self, url: str) -> ResolvedPost:
         raise NotImplementedError
 
 
@@ -111,7 +111,7 @@ class ThreadsHtmlParser:
         for item in media:
             unique[item.url] = item
         if not unique:
-            raise ValueError("No downloadable media found. The post may require a connected authorized session.")
+            raise ValueError("No downloadable media found. The post may be private or unavailable.")
         return ResolvedPost(post_id=post_id, author=author, caption=caption, media=list(unique.values()))
 
 
@@ -121,27 +121,7 @@ class HttpThreadsProvider(ThreadsProvider):
     def __init__(self):
         self.parser = ThreadsHtmlParser()
 
-    @staticmethod
-    def _cookies(session_blob: Optional[str]) -> dict[str, str]:
-        if not session_blob:
-            return {}
-        try:
-            parsed = json.loads(session_blob)
-            if isinstance(parsed, dict):
-                return {str(k): str(v) for k, v in parsed.items()}
-            if isinstance(parsed, list):
-                return {str(x["name"]): str(x["value"]) for x in parsed if "name" in x and "value" in x}
-        except Exception:
-            pass
-        # Support a Cookie header format for local development.
-        result: dict[str, str] = {}
-        for part in session_blob.split(";"):
-            if "=" in part:
-                k, v = part.split("=", 1)
-                result[k.strip()] = v.strip()
-        return result
-
-    async def resolve(self, url: str, session_blob: Optional[str]) -> ResolvedPost:
+    async def resolve(self, url: str) -> ResolvedPost:
         parsed = urlparse(url)
         if parsed.scheme != "https" or parsed.hostname not in self._allowed_hosts:
             raise ValueError("Only https://threads.com post URLs are accepted")
@@ -150,7 +130,7 @@ class HttpThreadsProvider(ThreadsProvider):
             "Accept-Language": "en-GB,en;q=0.9",
         }
         async with httpx.AsyncClient(follow_redirects=True, timeout=25.0, headers=headers) as client:
-            response = await client.get(url, cookies=self._cookies(session_blob))
+            response = await client.get(url)
             response.raise_for_status()
             if "threads." not in str(response.url):
                 raise ValueError("Threads redirected away from the requested post")

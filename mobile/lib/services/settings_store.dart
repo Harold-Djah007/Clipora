@@ -5,8 +5,6 @@ import 'resolver_url.dart';
 class AppSettings {
   final String filenameTemplate;
   final bool includeCaption;
-  final bool autoDeleteSession;
-  final int sessionTtlHours;
   final bool wifiOnly;
   final int maxConcurrentDownloads;
   final String resolverUrl;
@@ -14,8 +12,6 @@ class AppSettings {
   const AppSettings({
     this.filenameTemplate = '{author}_{postId}_{index}',
     this.includeCaption = true,
-    this.autoDeleteSession = true,
-    this.sessionTtlHours = 24,
     this.wifiOnly = false,
     this.maxConcurrentDownloads = 5,
     this.resolverUrl = ResolverUrl.defaultValue,
@@ -24,16 +20,12 @@ class AppSettings {
   AppSettings copyWith({
     String? filenameTemplate,
     bool? includeCaption,
-    bool? autoDeleteSession,
-    int? sessionTtlHours,
     bool? wifiOnly,
     int? maxConcurrentDownloads,
     String? resolverUrl,
   }) => AppSettings(
         filenameTemplate: filenameTemplate ?? this.filenameTemplate,
         includeCaption: includeCaption ?? this.includeCaption,
-        autoDeleteSession: autoDeleteSession ?? this.autoDeleteSession,
-        sessionTtlHours: sessionTtlHours ?? this.sessionTtlHours,
         wifiOnly: wifiOnly ?? this.wifiOnly,
         maxConcurrentDownloads: maxConcurrentDownloads ?? this.maxConcurrentDownloads,
         resolverUrl: resolverUrl ?? this.resolverUrl,
@@ -51,17 +43,11 @@ class SettingsStore {
       await p.setBool('clipora080TurboMigrated', true);
     }
 
-    var resolverUrl = p.getString('resolverUrl') ?? ResolverUrl.defaultValue;
-    if (resolverUrl == 'http://127.0.0.1:8010' || resolverUrl.trim().isEmpty) {
-      resolverUrl = ResolverUrl.defaultValue;
-      await p.setString('resolverUrl', resolverUrl);
-    }
+    final resolverUrl = p.getString('resolverUrl') ?? ResolverUrl.defaultValue;
 
     return AppSettings(
       filenameTemplate: p.getString('filenameTemplate') ?? '{author}_{postId}_{index}',
       includeCaption: p.getBool('includeCaption') ?? true,
-      autoDeleteSession: p.getBool('autoDeleteSession') ?? true,
-      sessionTtlHours: p.getInt('sessionTtlHours') ?? 24,
       wifiOnly: p.getBool('wifiOnly') ?? false,
       maxConcurrentDownloads: (lanes ?? 5).clamp(1, 6).toInt(),
       resolverUrl: resolverUrl,
@@ -72,8 +58,6 @@ class SettingsStore {
     final p = await SharedPreferences.getInstance();
     await p.setString('filenameTemplate', s.filenameTemplate);
     await p.setBool('includeCaption', s.includeCaption);
-    await p.setBool('autoDeleteSession', s.autoDeleteSession);
-    await p.setInt('sessionTtlHours', s.sessionTtlHours);
     await p.setBool('wifiOnly', s.wifiOnly);
     await p.setInt('maxConcurrentDownloads', s.maxConcurrentDownloads.clamp(1, 6).toInt());
     await p.setString('resolverUrl', s.resolverUrl);

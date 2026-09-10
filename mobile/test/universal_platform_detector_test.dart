@@ -24,10 +24,10 @@ void main() {
     expect(UniversalPlatformDetector.detect('https://example.com/video').platform, SocialPlatform.unknown);
   });
 
-  test('marks Instagram and Facebook for Smart Capture fallback', () {
-    expect(UniversalPlatformDetector.detect('https://www.instagram.com/reel/abc/').usesCaptureFallback, isTrue);
-    expect(UniversalPlatformDetector.detect('https://www.facebook.com/watch/?v=1').usesCaptureFallback, isTrue);
-    expect(UniversalPlatformDetector.detect('https://vm.tiktok.com/ZMh/').usesCaptureFallback, isFalse);
+  test('marks Instagram and Facebook as supported resolver platforms', () {
+    expect(UniversalPlatformDetector.detect('https://www.instagram.com/reel/abc/').isSupported, isTrue);
+    expect(UniversalPlatformDetector.detect('https://www.facebook.com/watch/?v=1').isSupported, isTrue);
+    expect(UniversalPlatformDetector.detect('https://vm.tiktok.com/ZMh/').isSupported, isTrue);
     expect(UniversalPlatformDetector.detect('https://www.threads.com/@user/post/abc').isThreads, isTrue);
   });
 }

@@ -9,7 +9,7 @@ The backend branch is only the first foundation. The Flutter app still needs a m
 - platform icons/chips in the paste screen
 - queue cards showing platform, media type, quality, and progress
 - fallback routing:
-  - Threads/private → local Smart Capture
+  - Threads/public → universal resolver
   - public universal links → backend `/api/resolve/universal`
 
 ## Testing command after mobile wire-up

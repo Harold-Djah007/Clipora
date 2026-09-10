@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:threadvault/services/resolver_url.dart';
 
 void main() {
-  test('blank resolver means field mode with no backend candidates', () {
+  test('blank resolver means downloads are not configured', () {
     expect(ResolverUrl.defaultValue, isEmpty);
     expect(ResolverUrl.isAllowed(''), isTrue);
     expect(ResolverUrl.isConfigured(''), isFalse);
@@ -21,6 +21,11 @@ void main() {
   test('rejects public HTTP resolver hosts', () {
     expect(ResolverUrl.isAllowed('http://example.com:8010'), isFalse);
     expect(ResolverUrl.isAllowed('ftp://192.168.1.10:8010'), isFalse);
+  });
+
+  test('defaults a host without a scheme to HTTPS', () {
+    expect(ResolverUrl.normalize('resolver.example.com'), 'https://resolver.example.com');
+    expect(ResolverUrl.isAllowed('resolver.example.com'), isTrue);
   });
 
   test('puts the preferred LAN URL first when a backend is configured', () {

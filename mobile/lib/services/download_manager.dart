@@ -218,7 +218,7 @@ class DownloadManager {
     final goodHost = host.contains('cdninstagram.com') || host.contains('fbcdn.net');
     if (!goodHost) return false;
     if (lower.contains('.mp4') || lower.contains('mime_type=video')) return true;
-    if (lower.contains('.jpg') || lower.contains('.jpeg') || lower.contains('.png') || lower.contains('.webp')) return true;
+    if (lower.contains('.jpg') || lower.contains('.jpeg') || lower.contains('.png') || lower.contains('.webp') || lower.contains('.gif')) return true;
     return false;
   }
 
@@ -243,7 +243,7 @@ class DownloadManager {
     try {
       final bytes = await raf.read(math.min(length, 128));
       if (_isMp4(bytes)) return _DetectedMediaKind.video;
-      if (_isJpeg(bytes) || _isPng(bytes) || _isWebp(bytes)) return _DetectedMediaKind.image;
+      if (_isJpeg(bytes) || _isPng(bytes) || _isWebp(bytes) || _isGif(bytes)) return _DetectedMediaKind.image;
       if (_isLikelyAudio(bytes)) return null;
       return null;
     } finally {
@@ -285,6 +285,15 @@ class DownloadManager {
       b[10] == 0x42 &&
       b[11] == 0x50;
 
+  bool _isGif(List<int> b) =>
+      b.length >= 6 &&
+      b[0] == 0x47 &&
+      b[1] == 0x49 &&
+      b[2] == 0x46 &&
+      b[3] == 0x38 &&
+      (b[4] == 0x37 || b[4] == 0x39) &&
+      b[5] == 0x61;
+
   bool _isLikelyAudio(List<int> b) {
     if (b.length < 4) return false;
     final id3 = b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33;
@@ -298,6 +307,7 @@ class DownloadManager {
     final mime = item.mimeType?.toLowerCase();
     if (mime == 'image/png') return 'png';
     if (mime == 'image/webp') return 'webp';
+    if (mime == 'image/gif') return 'gif';
     return 'jpg';
   }
 

@@ -43,18 +43,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final raw = resolver.text.trim();
     if (raw.isEmpty) {
       await _update(context.read<AppState>().settings.copyWith(resolverUrl: ''));
-      setState(() => resolverStatus = 'Field Mode saved: no PC/server is required. Clipora will use on-device Smart Capture.');
+      setState(() => resolverStatus = 'No resolver is configured. Shared links cannot download until you add one or install an APK with a bundled resolver.');
       return true;
     }
 
     if (!ResolverUrl.isAllowed(raw)) {
-      setState(() => resolverStatus = 'Use HTTPS for a hosted backend, or a private LAN/USB URL such as http://192.168.1.10:8010 or http://127.0.0.1:8010. Leave blank for Field Mode.');
+      setState(() => resolverStatus = 'Use HTTPS for a hosted resolver, or a private LAN/USB URL such as http://192.168.1.10:8010 or http://127.0.0.1:8010.');
       return false;
     }
     final value = ResolverUrl.normalize(raw);
     resolver.text = value;
     await _update(context.read<AppState>().settings.copyWith(resolverUrl: value));
-    setState(() => resolverStatus = 'Optional backend saved: $value');
+    setState(() => resolverStatus = 'Resolver saved: $value');
     return true;
   }
 
@@ -63,13 +63,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!saved || !mounted) return;
     final configured = context.read<AppState>().settings.resolverUrl.trim().isNotEmpty;
     if (!configured) {
-      setState(() => resolverStatus = 'Field Mode is active. You can sell/test the app without starting backend servers.');
+      setState(() => resolverStatus = 'Add a resolver URL before testing the connection.');
       return;
     }
 
     setState(() {
       resolverBusy = true;
-      resolverStatus = 'Checking optional backend…';
+      resolverStatus = 'Checking resolver…';
     });
     try {
       final base = await context.read<AppState>().universalResolver.ping();
@@ -95,7 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const CliporaSectionTitle(
             title: 'Settings',
-            subtitle: 'Field Mode, optional resolver, downloads, filenames, and session privacy',
+            subtitle: 'Resolver, downloads, filenames, and network preferences',
           ),
           const SizedBox(height: 18),
           CliporaHeroCard(
@@ -116,17 +116,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             glow: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const _PanelTitle(
-                icon: Icons.phone_android_rounded,
-                title: 'Field Mode',
-                subtitle: 'Leave Resolver URL blank to run without a PC/server. Add an optional hosted/LAN backend only as a power boost.',
+                icon: Icons.cloud_done_rounded,
+                title: 'Resolver',
+                subtitle: 'The APK uses this service to turn shared social links into downloadable media.',
               ),
               const SizedBox(height: 14),
               TextField(
                 controller: resolver,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  labelText: 'Optional Resolver URL',
-                  helperText: 'Blank = no server. Optional: https://your-backend.app or http://192.168.x.x:8010',
+                  labelText: 'Resolver URL',
+                  helperText: 'Hosted: https://your-backend.app · USB test: http://127.0.0.1:8010',
                   prefixIcon: Icon(Icons.link_rounded),
                 ),
                 onSubmitted: (_) => _saveResolver(),
@@ -214,35 +214,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
           ),
           const SizedBox(height: 16),
-          PremiumCard(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const _PanelTitle(icon: Icons.shield_rounded, title: 'Privacy', subtitle: 'Your login stays in the device WebView'),
-              const SizedBox(height: 8),
-              _SwitchRow(
-                icon: Icons.timer_off_rounded,
-                title: 'Auto-delete session',
-                subtitle: 'Expire connected Threads authentication automatically',
-                value: s.autoDeleteSession,
-                onChanged: (v) => _update(s.copyWith(autoDeleteSession: v)),
-              ),
-              if (s.autoDeleteSession) ...[
-                const SizedBox(height: 10),
-                Text('Session lifetime: ${s.sessionTtlHours} hours', style: const TextStyle(fontWeight: FontWeight.w800)),
-                Slider(
-                  min: 1,
-                  max: 168,
-                  divisions: 23,
-                  label: '${s.sessionTtlHours} h',
-                  value: s.sessionTtlHours.toDouble(),
-                  onChanged: (v) => _update(s.copyWith(sessionTtlHours: v.round())),
-                ),
-              ],
-            ]),
-          ),
-          const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 0.8.7 Field Mode'),
+              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 2.0.6 resolver-only'),
               SizedBox(height: 12),
               Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),

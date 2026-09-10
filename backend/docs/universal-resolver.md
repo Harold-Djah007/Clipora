@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This backend foundation turns Clipora into a platform-aware social media resolver while keeping the mobile Threads Smart Capture flow intact.
+This backend is Clipora's platform-aware resolver. The APK does not use a mobile WebView capture fallback.
 
 ## Supported detection targets
 
@@ -19,7 +19,7 @@ This backend foundation turns Clipora into a platform-aware social media resolve
 
 ```text
 POST /api/detect
-→ returns platform, hostname, support state, and whether local session may be needed
+→ returns platform, hostname, and resolver support state
 
 POST /api/resolve/universal
 → returns source page metadata and validated direct media candidates
@@ -33,7 +33,7 @@ POST /api/downloads
 
 ## Resolver strategy
 
-- Threads uses the existing `threads_provider` to avoid breaking the private-video fix.
+- Threads uses the dedicated public-page `threads_provider`.
 - Other supported platforms use `yt-dlp` as a resolver engine.
 - The provider prefers direct MP4 files because the current Android downloader can save direct files cleanly.
 - HLS `.m3u8` streams are not returned as mobile URLs. If a link is HLS-only, the backend downloads it locally and exposes `/api/files/{token}` for the phone.

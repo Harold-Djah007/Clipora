@@ -1,7 +1,7 @@
 name: threadvault
 description: Clipora 2.0 premium instant media saver with share-to-download UX, resolver-only engine for every platform, background saving, carousel saving up to 20 items, and commercial-grade dark UI.
 publish_to: 'none'
-version: 2.0.5+45
+version: 2.0.6+46
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -11,8 +11,6 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   dio: ^5.7.0
-  flutter_inappwebview: ^6.1.5
-  flutter_secure_storage: ^9.2.2
   path_provider: ^2.1.4
   provider: ^6.1.2
   shared_preferences: ^2.3.2

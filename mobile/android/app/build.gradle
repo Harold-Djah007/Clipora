@@ -1,8 +1,28 @@
+import java.util.Base64
+
 plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
 }
+
+def decodeFlutterDartDefines = {
+    def raw = project.findProperty("dart-defines") as String
+    if (!raw) return [:]
+    raw.split(',').findAll { !it.isBlank() }.collectEntries { encoded ->
+        try {
+            def decoded = new String(Base64.getDecoder().decode(encoded), "UTF-8")
+            def separator = decoded.indexOf('=')
+            separator > 0 ? [(decoded.substring(0, separator)): decoded.substring(separator + 1)] : [:]
+        } catch (IllegalArgumentException ignored) {
+            [:]
+        }
+    }
+}
+
+def flutterDartDefines = decodeFlutterDartDefines()
+def cliporaResolverUrl = (project.findProperty("CLIPORA_RESOLVER_URL") as String) ?:
+        flutterDartDefines["CLIPORA_RESOLVER_URL"] ?: ""
 
 android {
     namespace = "com.threadvault.app"
@@ -21,6 +41,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        resValue "string", "clipora_resolver_url", cliporaResolverUrl
     }
 
     buildTypes {

@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 import 'app/app_state.dart';
 import 'features/downloads/clipora_2_downloads_screen.dart';
 import 'features/history/history_screen.dart';
-import 'features/session/session_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'widgets/threadvault_mark.dart';
 
@@ -142,7 +141,7 @@ class _CliporaLaunchGateState extends State<CliporaLaunchGate> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 1250), () {
+    Timer(const Duration(milliseconds: 650), () {
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -262,7 +261,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int index = 0;
-  final pages = const [Clipora2DownloadsScreen(), HistoryScreen(), SessionScreen(), SettingsScreen()];
+  final pages = const [Clipora2DownloadsScreen(), HistoryScreen(), SettingsScreen()];
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +290,6 @@ class _HomeShellState extends State<HomeShell> {
                   destinations: const [
                     NavigationDestination(icon: Icon(Icons.auto_awesome_rounded), selectedIcon: Icon(Icons.bolt_rounded), label: 'Save'),
                     NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library_rounded), label: 'Library'),
-                    NavigationDestination(icon: Icon(Icons.verified_user_outlined), selectedIcon: Icon(Icons.verified_user_rounded), label: 'Access'),
                     NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.settings_suggest_rounded), label: 'Settings'),
                   ],
                 ),

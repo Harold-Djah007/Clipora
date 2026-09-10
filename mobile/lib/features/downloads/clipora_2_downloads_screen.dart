@@ -154,10 +154,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     }
 
     try {
-      final ok = await context.read<AppState>().resolveAndDownload(
-        urls,
-        sourceLoader: (_) async => throw StateError('On-device page capture is disabled. Clipora Instant uses the resolver engine only.'),
-      );
+      final ok = await context.read<AppState>().resolveAndDownload(urls);
       if (!mounted) return;
       if (ok) {
         setState(() {
@@ -195,11 +192,15 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
 
   void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
-  String _cleanError(Object error) => error
+  String _cleanError(Object error) {
+    final text = error
       .toString()
+      .replaceAll(RegExp(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'), '')
       .replaceFirst('StateError: ', '')
       .replaceFirst('Bad state: ', '')
       .replaceFirst('FormatException: ', '');
+    return text.length <= 360 ? text : '${text.substring(0, 359).trimRight()}…';
+  }
 
   @override
   Widget build(BuildContext context) {

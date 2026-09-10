@@ -6,7 +6,7 @@ Clipora can be powerful without becoming unsafe.
 
 - Detect supported social platforms.
 - Resolve public/share links where supported.
-- Use the user's local signed-in session only for media they can already view.
+- Resolve public/share links without collecting account credentials.
 - Save best available direct media to the user's Gallery.
 - Preserve source/creator metadata.
 

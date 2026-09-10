@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.media.MediaScannerConnection
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -24,7 +25,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         captureSharedUrl(intent)
-        requestNotificationPermissionIfNeeded()
+        requestRuntimePermissionsIfNeeded()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -99,10 +100,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < 33) return
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7108)
+    private fun requestRuntimePermissionsIfNeeded() {
+        val missing = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 7108)
     }
 
     private fun captureSharedUrl(intent: Intent?) {
@@ -128,7 +134,7 @@ class MainActivity : FlutterActivity() {
         require(source.exists() && source.length() > 0) { "Source file is missing or empty" }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return source.absolutePath
+            return publishLegacyMedia(source, fileName, mimeType)
         }
 
         val (collection, relativePath) = when {
@@ -161,6 +167,35 @@ class MainActivity : FlutterActivity() {
             resolver.delete(uri, null, null)
             throw e
         }
+    }
+
+    private fun publishLegacyMedia(source: File, fileName: String, mimeType: String): String {
+        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            throw IllegalStateException("Storage permission is required on this Android version. Open Clipora once and allow storage access.")
+        }
+        val parent = when {
+            mimeType.startsWith("video/") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            mimeType.startsWith("image/") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            else -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        }
+        val folder = File(parent, "Clipora").apply { mkdirs() }
+        val destination = uniqueLegacyFile(folder, fileName)
+        FileInputStream(source).use { input -> destination.outputStream().use { output -> input.copyTo(output, 1024 * 1024) } }
+        MediaScannerConnection.scanFile(this, arrayOf(destination.absolutePath), arrayOf(mimeType), null)
+        return destination.absolutePath
+    }
+
+    private fun uniqueLegacyFile(folder: File, fileName: String): File {
+        val requested = File(folder, fileName)
+        if (!requested.exists()) return requested
+        val dot = fileName.lastIndexOf('.')
+        val stem = if (dot > 0) fileName.substring(0, dot) else fileName
+        val suffix = if (dot > 0) fileName.substring(dot) else ""
+        for (index in 2..999) {
+            val candidate = File(folder, "${stem}_$index$suffix")
+            if (!candidate.exists()) return candidate
+        }
+        return File(folder, "${stem}_${System.currentTimeMillis()}$suffix")
     }
 
     private fun isOnWifi(): Boolean {

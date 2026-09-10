@@ -3,23 +3,19 @@ import 'package:flutter/foundation.dart';
 import '../models/media_models.dart';
 import '../services/download_manager.dart';
 import '../services/history_store.dart';
-import '../services/session_service.dart';
 import '../services/settings_store.dart';
 import '../services/platform_services.dart';
 import '../services/universal_platform_detector.dart';
 import '../services/universal_resolver_service.dart';
 
 class AppState extends ChangeNotifier {
-  Timer? _sessionTimer;
   final historyStore = HistoryStore();
-  final sessionService = SessionService();
   late final DownloadManager downloadManager = DownloadManager(historyStore);
   final settingsStore = SettingsStore();
   late UniversalResolverService universalResolver = UniversalResolverService();
 
   AppSettings settings = const AppSettings();
   List<DownloadRecord> history = [];
-  bool sessionConnected = false;
   bool busy = false;
   int activeJobs = 0;
   int lastRunSaved = 0;
@@ -30,17 +26,6 @@ class AppState extends ChangeNotifier {
     settings = await settingsStore.load();
     universalResolver = UniversalResolverService(preferredBaseUrl: settings.resolverUrl);
     history = await historyStore.load();
-    sessionConnected = await sessionService.hasSession(ttlHours: settings.sessionTtlHours);
-    _sessionTimer?.cancel();
-    _sessionTimer = Timer.periodic(const Duration(minutes: 15), (_) async {
-      if (settings.autoDeleteSession) {
-        final active = await sessionService.hasSession(ttlHours: settings.sessionTtlHours);
-        if (active != sessionConnected) {
-          sessionConnected = active;
-          notifyListeners();
-        }
-      }
-    });
     notifyListeners();
   }
 
@@ -48,21 +33,6 @@ class AppState extends ChangeNotifier {
     settings = next;
     universalResolver = UniversalResolverService(preferredBaseUrl: next.resolverUrl);
     await settingsStore.save(next);
-    if (next.autoDeleteSession) {
-      sessionConnected = await sessionService.hasSession(ttlHours: next.sessionTtlHours);
-    }
-    notifyListeners();
-  }
-
-  Future<void> refreshSession() async {
-    await sessionService.snapshot();
-    sessionConnected = await sessionService.hasSession(ttlHours: settings.sessionTtlHours);
-    notifyListeners();
-  }
-
-  Future<void> disconnect() async {
-    await sessionService.clearSession();
-    sessionConnected = false;
     notifyListeners();
   }
 
@@ -78,10 +48,7 @@ class AppState extends ChangeNotifier {
   /// URL to the configured Clipora resolver, then the APK saves the media returned
   /// by that resolver. This is the Pinget-style route the app now uses for every
   /// supported platform, including Threads.
-  Future<List<ResolvedPost>> scanForMedia(
-    List<String> urls, {
-    required Future<String> Function(String url) sourceLoader,
-  }) async {
+  Future<List<ResolvedPost>> scanForMedia(List<String> urls) async {
     if (urls.isEmpty) return const [];
 
     activeJobs += 1;
@@ -214,15 +181,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> resolveAndDownload(
-    List<String> urls, {
-    required Future<String> Function(String url) sourceLoader,
-  }) async {
+  Future<bool> resolveAndDownload(List<String> urls) async {
     await PlatformServices.startDownloadService(
       message: 'Clipora accepted the link. You can keep watching; resolving continues in the background.',
     );
     try {
-      final posts = await scanForMedia(urls, sourceLoader: sourceLoader);
+      final posts = await scanForMedia(urls);
       return await saveResolvedMedia(posts);
     } catch (error) {
       lastRunHadErrors = true;
@@ -255,15 +219,14 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  String _friendlyError(Object error) => error
+  String _friendlyError(Object error) {
+    final text = error
       .toString()
+      .replaceAll(RegExp(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'), '')
       .replaceFirst('FormatException: ', '')
       .replaceFirst('Bad state: ', '')
       .replaceFirst('StateError: ', '');
-
-  @override
-  void dispose() {
-    _sessionTimer?.cancel();
-    super.dispose();
+    return text.length <= 360 ? text : '${text.substring(0, 359).trimRight()}…';
   }
+
 }

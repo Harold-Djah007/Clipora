@@ -38,6 +38,15 @@ def test_image_thumbnail_used_only_when_no_video_exists():
     assert media[0].url.endswith("large.jpg")
 
 
+def test_gif_is_preserved_as_downloadable_image():
+    provider = UniversalProvider()
+    media = provider._extract_media_items({"url": "https://cdn.example/animation.gif", "ext": "gif"})
+
+    assert len(media) == 1
+    assert media[0].media_type == "image"
+    assert media[0].mime_type == "image/gif"
+
+
 def test_resolve_keeps_every_video_entry(monkeypatch):
     provider = UniversalProvider()
     info = {
@@ -95,13 +104,64 @@ def test_resolve_caps_carousel_entries_at_twenty(monkeypatch):
     assert post.media[0].url.endswith("clip-0.mp4")
     assert post.media[-1].url.endswith("clip-19.mp4")
 
-def test_tiktok_preserves_mobile_short_link_identity():
+def test_tiktok_does_not_force_headers_that_break_short_link_expansion():
     provider = UniversalProvider()
 
     opts = provider._ydl_opts_for("https://vt.tiktok.com/example/")
     headers = opts["http_headers"]
 
-    assert "Android 13" in headers["User-Agent"]
-    assert headers["Referer"] == "https://vt.tiktok.com/"
+    assert "User-Agent" not in headers
+    assert "Referer" not in headers
     assert headers["Accept-Language"] == "en-US,en;q=0.9"
 
+
+def test_tiktok_short_link_expansion_accepts_only_canonical_video(monkeypatch):
+    provider = UniversalProvider()
+
+    class Response:
+        url = "https://www.tiktok.com/@creator/video/7682000490246262048"
+        headers = {}
+        text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            return Response()
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    expanded = provider._expand_tiktok_short_url("https://vt.tiktok.com/ZSgU4uAMT/")
+    assert expanded == Response.url
+
+
+def test_tiktok_short_link_expansion_rejects_homepage_redirect(monkeypatch):
+    provider = UniversalProvider()
+
+    class Response:
+        url = "https://www.tiktok.com/?_r=1"
+        headers = {}
+        text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            return Response()
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    short = "https://vt.tiktok.com/ZSgU4uAMT/"
+    assert provider._expand_tiktok_short_url(short) == short

@@ -18,7 +18,7 @@ class ResolverUrl {
   static String normalize(String raw) {
     var value = raw.trim();
     if (value.isEmpty) return defaultValue.trim();
-    if (!value.contains('://')) value = 'http://$value';
+    if (!value.contains('://')) value = 'https://$value';
     while (value.endsWith('/')) {
       value = value.substring(0, value.length - 1);
     }

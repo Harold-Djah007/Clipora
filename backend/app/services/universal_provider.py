@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 
+import httpx
+
 from app.services.file_cache import media_file_cache
 from app.services.platforms import Platform, detect_platform, ensure_supported_platform, safe_filename_part
 from app.services.threads_provider import provider as threads_provider
@@ -23,6 +25,7 @@ except Exception:  # pragma: no cover - depends on deployment environment
 class UniversalMedia:
     media_type: str
     url: str
+    mime_type: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
     filesize: Optional[int] = None
@@ -43,7 +46,7 @@ class UniversalPost:
 class UniversalProvider:
     """Safe resolver provider for Clipora's universal saver direction.
 
-    Threads deliberately remains on Clipora's local session-aware resolver. All other
+    Threads deliberately remains on Clipora's dedicated public-page resolver. All other
     supported services go through a mature extractor-style pipeline inspired by proven
     open-source downloaders: try site metadata, preserve playlist/carousel entries,
     inspect nested media URLs, proxy videos through the backend cache when needed,
@@ -66,18 +69,13 @@ class UniversalProvider:
         "fragment_retries": 3,
         "http_headers": {
             "Accept-Language": "en-US,en;q=0.9",
-            "User-Agent": (
-                "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Mobile Safari/537.36"
-            ),
         },
     }
 
-    async def resolve(self, url: str, session_blob: Optional[str] = None) -> UniversalPost:
+    async def resolve(self, url: str) -> UniversalPost:
         platform_info = ensure_supported_platform(url)
         if platform_info.platform == Platform.THREADS:
-            return await self._resolve_threads(url, session_blob)
+            return await self._resolve_threads(url)
         return await self._resolve_with_ytdlp(url)
 
     async def detect(self, url: str) -> dict[str, Any]:
@@ -90,8 +88,8 @@ class UniversalProvider:
             "supports_server_resolve": info.supports_server_resolve,
         }
 
-    async def _resolve_threads(self, url: str, session_blob: Optional[str]) -> UniversalPost:
-        post = await threads_provider.resolve(url, session_blob)
+    async def _resolve_threads(self, url: str) -> UniversalPost:
+        post = await threads_provider.resolve(url)
         return UniversalPost(
             post_id=post.post_id,
             author=post.author,
@@ -103,6 +101,7 @@ class UniversalProvider:
                 UniversalMedia(
                     media_type=item.media_type,
                     url=item.url,
+                    mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
                     width=item.width,
                     height=item.height,
                     quality=self._quality_label(item.width, item.height),
@@ -164,16 +163,67 @@ class UniversalProvider:
     def _extract_info(self, url: str) -> dict[str, Any]:
         platform = detect_platform(url).platform
         allow_playlist = platform not in {Platform.THREADS, Platform.YOUTUBE}
-        opts = self._ydl_opts_for(url, allow_playlist=allow_playlist)
-        try:
-            return self._extract_info_with_opts(url, opts)
-        except Exception as exc:
-            if not self._should_retry_without_format(exc):
-                raise
-            fallback_opts = dict(opts)
-            fallback_opts.pop("format", None)
-            fallback_opts["skip_download"] = True
-            return self._extract_info_with_opts(url, fallback_opts)
+        extractor_url = self._expand_tiktok_short_url(url) if platform == Platform.TIKTOK else url
+        opts = self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)
+        attempts = [(extractor_url, opts)]
+        if platform == Platform.TIKTOK:
+            # Let yt-dlp/curl-cffi use its own browser profile. A forced mobile UA
+            # or short-link Referer can make TikTok redirect to `/?_r=1`.
+            browser_opts = dict(opts)
+            browser_opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
+            browser_opts["impersonate"] = "chrome"
+            attempts.append((url, browser_opts))
+
+        last_error: Exception | None = None
+        for attempt_url, attempt_opts in attempts:
+            try:
+                return self._extract_info_with_opts(attempt_url, attempt_opts)
+            except Exception as exc:
+                last_error = exc
+                if self._should_retry_without_format(exc):
+                    fallback_opts = dict(attempt_opts)
+                    fallback_opts.pop("format", None)
+                    fallback_opts["skip_download"] = True
+                    try:
+                        return self._extract_info_with_opts(attempt_url, fallback_opts)
+                    except Exception as fallback_error:
+                        last_error = fallback_error
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _expand_tiktok_short_url(url: str) -> str:
+        """Resolve vt/vm links before extraction without accepting off-site redirects."""
+
+        parsed = urlparse(url)
+        if (parsed.hostname or "").lower() not in {"vt.tiktok.com", "vm.tiktok.com"}:
+            return url
+
+        profiles = (
+            {"User-Agent": "facebookexternalhit/1.1"},
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        for headers in profiles:
+            try:
+                with httpx.Client(follow_redirects=True, timeout=8.0, headers=headers) as client:
+                    response = client.get(url)
+                candidates = [str(response.url), response.headers.get("location", "")]
+                candidates.extend(re.findall(r"https://(?:www\.)?tiktok\.com/@[^\s\"']+/(?:video|photo)/\d+", response.text))
+                for candidate in candidates:
+                    target = urlparse(candidate)
+                    host = (target.hostname or "").lower()
+                    if host == "tiktok.com" or host.endswith(".tiktok.com"):
+                        if re.search(r"/(?:video|photo)/\d+", target.path):
+                            return candidate
+            except (httpx.HTTPError, ValueError):
+                continue
+        return url
 
     def _extract_info_with_opts(self, url: str, opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
@@ -194,10 +244,9 @@ class UniversalProvider:
         elif platform == Platform.YOUTUBE:
             opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv"]}}
         elif platform == Platform.TIKTOK:
-            # Keep the originating TikTok host while yt-dlp expands vt/vm
-            # short links. curl-cffi supplies the browser TLS fingerprint when
-            # yt-dlp subsequently loads the canonical video page.
-            headers["Referer"] = f"https://{urlparse(url).hostname or 'www.tiktok.com'}/"
+            # TikTok's extractor owns its User-Agent, Referer and browser
+            # impersonation. Overriding them breaks vt/vm short-link expansion.
+            headers.pop("User-Agent", None)
         elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT}:
             headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
 
@@ -350,7 +399,7 @@ class UniversalProvider:
 
         media_file_cache.put(path, token)
         suffix = path.suffix.lower()
-        media_type = "image" if suffix in {".jpg", ".jpeg", ".png", ".webp"} else "video"
+        media_type = "image" if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"} else "video"
         downloaded_info = downloaded if isinstance(downloaded, dict) else {}
         width = self._int_or_none(downloaded_info.get("width")) or self._int_or_none(info.get("width"))
         height = self._int_or_none(downloaded_info.get("height")) or self._int_or_none(info.get("height"))
@@ -358,6 +407,7 @@ class UniversalProvider:
             UniversalMedia(
                 media_type=media_type,
                 url=f"/api/files/{token}",
+                mime_type=self._image_mime_type(str(path)) if media_type == "image" else "video/mp4",
                 width=width,
                 height=height,
                 filesize=path.stat().st_size,
@@ -449,6 +499,7 @@ class UniversalProvider:
         return UniversalMedia(
             media_type="video",
             url=url,
+            mime_type="video/mp4",
             width=width,
             height=height,
             filesize=filesize,
@@ -502,6 +553,7 @@ class UniversalProvider:
             return UniversalMedia(
                 media_type="video",
                 url=url,
+                mime_type="video/mp4",
                 width=width_i,
                 height=height_i,
                 quality=self._quality_label(width_i, height_i) or "video",
@@ -510,6 +562,7 @@ class UniversalProvider:
             return UniversalMedia(
                 media_type="image",
                 url=url,
+                mime_type=self._image_mime_type(url),
                 width=width_i,
                 height=height_i,
                 quality=self._quality_label(width_i, height_i) or "image",
@@ -582,6 +635,7 @@ class UniversalProvider:
                 or ".jpeg" in lower
                 or ".png" in lower
                 or ".webp" in lower
+                or ".gif" in lower
                 or "mime=image" in lower
                 or "image/jpeg" in lower
                 or "image/webp" in lower
@@ -592,6 +646,17 @@ class UniversalProvider:
                 or "og:image" in hint
             )
         )
+
+    @staticmethod
+    def _image_mime_type(url: str) -> str:
+        lower = url.lower()
+        if ".gif" in lower or "image/gif" in lower:
+            return "image/gif"
+        if ".png" in lower or "image/png" in lower:
+            return "image/png"
+        if ".webp" in lower or "image/webp" in lower:
+            return "image/webp"
+        return "image/jpeg"
 
     def _dedupe_media(self, items: list[UniversalMedia]) -> list[UniversalMedia]:
         unique: dict[str, UniversalMedia] = {}

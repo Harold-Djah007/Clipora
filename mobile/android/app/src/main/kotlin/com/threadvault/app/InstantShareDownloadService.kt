@@ -8,6 +8,11 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.Manifest
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
@@ -69,6 +74,9 @@ class InstantShareDownloadService : Service() {
                     "No Clipora resolver URL is configured. Build with -PCLIPORA_RESOLVER_URL=https://your-resolver or --dart-define=CLIPORA_RESOLVER_URL=https://your-resolver."
                 )
             }
+            if (wifiOnlyEnabled() && !isOnWifi()) {
+                throw IllegalStateException("Wi-Fi only is enabled. Connect to Wi-Fi or turn it off in Clipora Settings.")
+            }
 
             urls.forEachIndexed { index, url ->
                 try {
@@ -90,7 +98,7 @@ class InstantShareDownloadService : Service() {
                         val postId = safePart(post.optString("post_id", post.optString("id", UUID.randomUUID().toString())))
                         val fileName = "${author}_${postId}_${i + 1}$ext"
                         updateProgress("Saving ${i + 1}/${media.length()} from link ${index + 1}/${urls.size}…")
-                        val temp = downloadToTemp(mediaUrl, ext)
+                        val temp = downloadToTemp(mediaUrl, ext, mimeType)
                         try {
                             publishMedia(temp, fileName, mimeType)
                             saved++
@@ -100,7 +108,7 @@ class InstantShareDownloadService : Service() {
                     }
                 } catch (error: Exception) {
                     failed++
-                    errors.add(error.message ?: error.toString())
+                    errors.add(cleanError(error))
                 }
             }
 
@@ -112,7 +120,7 @@ class InstantShareDownloadService : Service() {
             }
             completeNotification(if (ok) "Clipora saved media" else "Clipora share failed", message, ok)
         } catch (error: Exception) {
-            completeNotification("Clipora needs resolver", error.message ?: error.toString(), false)
+            completeNotification("Clipora could not save", cleanError(error), false)
         } finally {
             if (activeJobs.decrementAndGet() <= 0) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -130,7 +138,19 @@ class InstantShareDownloadService : Service() {
         if (configured.isNotBlank()) return configured
         val bundled = normalizeBaseUrl(bundledResolverUrl())
         if (bundled.isNotBlank()) return bundled
-        return normalizeBaseUrl("http://127.0.0.1:8010")
+        return ""
+    }
+
+    private fun wifiOnlyEnabled(): Boolean {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        return prefs.getBoolean("flutter.wifiOnly", prefs.getBoolean("wifiOnly", false))
+    }
+
+    private fun isOnWifi(): Boolean {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
     @Suppress("DiscouragedApi")
@@ -168,7 +188,7 @@ class InstantShareDownloadService : Service() {
         }
     }
 
-    private fun downloadToTemp(mediaUrl: String, ext: String): File {
+    private fun downloadToTemp(mediaUrl: String, ext: String, mimeType: String): File {
         val temp = File(cacheDir, "clipora-${UUID.randomUUID()}$ext")
         val conn = (URL(mediaUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 5000
@@ -183,14 +203,37 @@ class InstantShareDownloadService : Service() {
                 FileOutputStream(temp).use { output -> input.copyTo(output, 1024 * 1024) }
             }
             if (!temp.exists() || temp.length() == 0L) throw IllegalStateException("Downloaded file was empty.")
+            if (!matchesExpectedMedia(temp, mimeType)) {
+                temp.delete()
+                throw IllegalStateException("The media host returned a page or unsupported file instead of the expected media.")
+            }
             return temp
         } finally {
             conn.disconnect()
         }
     }
 
+    private fun matchesExpectedMedia(file: File, mimeType: String): Boolean {
+        val bytes = FileInputStream(file).use { input -> ByteArray(128).let { buffer -> buffer.copyOf(input.read(buffer).coerceAtLeast(0)) } }
+        fun byte(index: Int): Int = if (index < bytes.size) bytes[index].toInt() and 0xff else -1
+        val isJpeg = byte(0) == 0xff && byte(1) == 0xd8 && byte(2) == 0xff
+        val isPng = byte(0) == 0x89 && byte(1) == 0x50 && byte(2) == 0x4e && byte(3) == 0x47
+        val isWebp = byte(0) == 0x52 && byte(1) == 0x49 && byte(2) == 0x46 && byte(3) == 0x46 &&
+            byte(8) == 0x57 && byte(9) == 0x45 && byte(10) == 0x42 && byte(11) == 0x50
+        val isGif = byte(0) == 0x47 && byte(1) == 0x49 && byte(2) == 0x46 && byte(3) == 0x38 &&
+            (byte(4) == 0x37 || byte(4) == 0x39) && byte(5) == 0x61
+        var isMp4 = false
+        for (index in 0..(bytes.size - 4).coerceAtMost(32)) {
+            if (byte(index) == 0x66 && byte(index + 1) == 0x74 && byte(index + 2) == 0x79 && byte(index + 3) == 0x70) {
+                isMp4 = true
+                break
+            }
+        }
+        return if (mimeType.startsWith("image/")) isJpeg || isPng || isWebp || isGif else isMp4
+    }
+
     private fun publishMedia(source: File, fileName: String, mimeType: String): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return source.absolutePath
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return publishLegacyMedia(source, fileName, mimeType)
         val (collection, relativePath) = when {
             mimeType.startsWith("video/") -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "${Environment.DIRECTORY_MOVIES}/Clipora"
             mimeType.startsWith("image/") -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "${Environment.DIRECTORY_PICTURES}/Clipora"
@@ -215,6 +258,35 @@ class InstantShareDownloadService : Service() {
             contentResolver.delete(uri, null, null)
             throw error
         }
+    }
+
+    private fun publishLegacyMedia(source: File, fileName: String, mimeType: String): String {
+        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            throw IllegalStateException("Storage permission is required on this Android version. Open Clipora once and allow storage access.")
+        }
+        val parent = when {
+            mimeType.startsWith("video/") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            mimeType.startsWith("image/") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            else -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        }
+        val folder = File(parent, "Clipora").apply { mkdirs() }
+        val destination = uniqueLegacyFile(folder, fileName)
+        FileInputStream(source).use { input -> destination.outputStream().use { output -> input.copyTo(output, 1024 * 1024) } }
+        MediaScannerConnection.scanFile(this, arrayOf(destination.absolutePath), arrayOf(mimeType), null)
+        return destination.absolutePath
+    }
+
+    private fun uniqueLegacyFile(folder: File, fileName: String): File {
+        val requested = File(folder, fileName)
+        if (!requested.exists()) return requested
+        val dot = fileName.lastIndexOf('.')
+        val stem = if (dot > 0) fileName.substring(0, dot) else fileName
+        val suffix = if (dot > 0) fileName.substring(dot) else ""
+        for (index in 2..999) {
+            val candidate = File(folder, "${stem}_$index$suffix")
+            if (!candidate.exists()) return candidate
+        }
+        return File(folder, "${stem}_${System.currentTimeMillis()}$suffix")
     }
 
     private fun updateProgress(message: String) {
@@ -322,6 +394,7 @@ class InstantShareDownloadService : Service() {
             val lower = "$mimeType $url".lowercase(Locale.US)
             return when {
                 lower.contains("image/webp") || lower.contains(".webp") -> ".webp"
+                lower.contains("image/gif") || lower.contains(".gif") -> ".gif"
                 lower.contains("image/png") || lower.contains(".png") -> ".png"
                 lower.contains("image/") || lower.contains(".jpg") || lower.contains(".jpeg") -> ".jpg"
                 else -> ".mp4"
@@ -331,6 +404,19 @@ class InstantShareDownloadService : Service() {
         private fun safePart(raw: String): String {
             val cleaned = raw.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_', '.', '-')
             return cleaned.take(80).ifBlank { "clipora" }
+        }
+
+        private fun cleanError(error: Throwable): String {
+            var text = error.message ?: error.toString()
+            text = text.replace(Regex("\u001B(?:[@-Z\\-_]|\\[[0-?]*[ -/]*[@-~])"), "")
+                .replace(Regex("\\s+"), " ")
+                .replace(Regex("^(?:ERROR:\\s*)+", RegexOption.IGNORE_CASE), "")
+                .trim()
+            if (text.contains("tiktok.com/?_r=1", ignoreCase = true) || text.contains("status code 0", ignoreCase = true)) {
+                return "TikTok did not release this video to the resolver. Retry, or use a hosted resolver."
+            }
+            if (text.isBlank()) return "The resolver could not extract downloadable media from this link."
+            return if (text.length <= 280) text else text.take(279).trimEnd() + "…"
         }
     }
 }

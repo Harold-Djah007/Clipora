@@ -2,8 +2,8 @@ import uuid
 from typing import Dict
 
 from app.schemas.download import DownloadJob, DownloadRequest, MediaItem
-from app.services.session_store import session_store
 from app.services.platforms import safe_filename_part
+from app.services.resolver_errors import public_resolver_error
 from app.services.universal_provider import universal_provider
 
 _jobs: Dict[str, DownloadJob] = {}
@@ -22,10 +22,9 @@ async def create_job(user_id: str, req: DownloadRequest) -> DownloadJob:
     job = DownloadJob(id=job_id, status="running", items=[])
     _jobs[job_id] = job
     try:
-        session = session_store.get(user_id)
         items = []
         for post_url in req.urls:
-            post = await universal_provider.resolve(str(post_url), session)
+            post = await universal_provider.resolve(str(post_url))
             author = safe_filename_part(post.author, "clipora")
             post_id = safe_filename_part(post.post_id, "media")
             for idx, media in enumerate(post.media, start=1):
@@ -50,7 +49,7 @@ async def create_job(user_id: str, req: DownloadRequest) -> DownloadJob:
                 ))
         _jobs[job_id] = DownloadJob(id=job_id, status="completed", items=items)
     except Exception as exc:
-        _jobs[job_id] = DownloadJob(id=job_id, status="failed", error=str(exc), items=[])
+        _jobs[job_id] = DownloadJob(id=job_id, status="failed", error=public_resolver_error(exc), items=[])
     return _jobs[job_id]
 
 
