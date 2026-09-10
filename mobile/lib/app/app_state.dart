@@ -1,18 +1,18 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+
 import '../models/media_models.dart';
 import '../services/download_manager.dart';
 import '../services/history_store.dart';
+import '../services/platform_services.dart';
 import '../services/session_service.dart';
 import '../services/settings_store.dart';
-import '../services/platform_services.dart';
-import '../services/threads_parser.dart';
 import '../services/universal_platform_detector.dart';
 import '../services/universal_resolver_service.dart';
 
 class AppState extends ChangeNotifier {
   Timer? _sessionTimer;
-  final parser = ThreadsParser();
   final historyStore = HistoryStore();
   final sessionService = SessionService();
   late final DownloadManager downloadManager = DownloadManager(historyStore);
@@ -74,12 +74,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Builds a media plan from pasted links.
+  /// Builds a save plan from pasted links using the hosted resolver only.
   ///
-  /// Threads is the only platform that is allowed to use Clipora's existing
-  /// local capture path. Every other platform must resolve through the
-  /// yt-dlp-style backend resolver, so the app no longer opens/captures social
-  /// pages for TikTok, Instagram, X, Pinterest, Facebook, Snapchat, or YouTube.
+  /// Clipora Instant no longer opens a phone WebView for Snapchat, Threads,
+  /// TikTok, Instagram, X, Pinterest, Facebook, or YouTube. Every supported
+  /// platform is automatic: paste/share -> resolver extracts -> APK saves.
   Future<List<ResolvedPost>> scanForMedia(
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
@@ -107,12 +106,12 @@ class AppState extends ChangeNotifier {
           if (!platform.isSupported) {
             throw StateError('Unsupported link. Clipora supports ${UniversalPlatformDetector.supportedLabel}.');
           }
-          debugPrint('[Clipora] instant resolve ${platform.label}: $url');
-          final post = await _resolvePost(url, platform, sourceLoader);
-          debugPrint('[Clipora] instant resolver found ${post.media.length} media item(s) for ${post.postId} via ${platform.label}');
+          debugPrint('[Clipora] instant resolver-only ${platform.label}: $url');
+          final post = await _resolvePost(url, platform);
+          debugPrint('[Clipora] resolver found ${post.media.length} media item(s) for ${post.postId} via ${platform.label}');
           posts.add(post);
         } catch (e, st) {
-          debugPrint('[Clipora] instant resolve failed: $e\n$st');
+          debugPrint('[Clipora] resolver-only link failed: $e\n$st');
           errors.add(_friendlyError(e));
         }
       }
@@ -222,42 +221,21 @@ class AppState extends ChangeNotifier {
     return saveResolvedMedia(posts);
   }
 
-  Future<ResolvedPost> _resolvePost(
-    String url,
-    PlatformMatch platform,
-    Future<String> Function(String url) sourceLoader,
-  ) async {
-    if (platform.isThreads) {
-      return _resolveThreadsWithCapture(url, platform, sourceLoader);
-    }
-
+  Future<ResolvedPost> _resolvePost(String url, PlatformMatch platform) async {
     if (!universalResolver.hasConfiguredBackend) {
       throw StateError(
-        'A hosted Clipora resolver is required for ${platform.label}. Non-Threads no longer use the old phone WebView capture path, so Snapchat/TikTok/Instagram/X/Facebook/Pinterest/YouTube can run like Pinget: paste link, backend resolves, APK saves automatically.',
+        'Clipora Instant needs a hosted resolver URL to stay fully automatic. No platform uses the old phone page-capture flow anymore, including Threads. Add a resolver in Settings or build the APK with --dart-define=CLIPORA_RESOLVER_URL=https://your-resolver-domain.',
       );
     }
 
     try {
-      status = 'Resolver Boost: extracting ${platform.label} media…';
+      status = 'Clipora Resolver: extracting ${platform.label} media…';
       await PlatformServices.updateDownloadService(message: status!);
       notifyListeners();
       return await universalResolver.resolve(url);
     } catch (error) {
       throw StateError('Resolver failed for ${platform.label}: ${_friendlyError(error)}');
     }
-  }
-
-  Future<ResolvedPost> _resolveThreadsWithCapture(
-    String url,
-    PlatformMatch platform,
-    Future<String> Function(String url) sourceLoader,
-  ) async {
-    status = 'Capturing Threads media quietly on this phone…';
-    notifyListeners();
-
-    final source = await sourceLoader(url);
-    debugPrint('[Clipora] Threads field capture source bytes=${source.length}');
-    return parser.parse(source, url);
   }
 
   String _friendlyError(Object error) => error
