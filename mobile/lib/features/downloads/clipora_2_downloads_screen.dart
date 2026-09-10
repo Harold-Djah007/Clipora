@@ -12,6 +12,8 @@ import '../../services/universal_platform_detector.dart';
 import '../../widgets/premium_card.dart';
 import '../../widgets/threadvault_mark.dart';
 
+enum _StudioStage { paste, analyze, pick, save }
+
 class Clipora2DownloadsScreen extends StatefulWidget {
   const Clipora2DownloadsScreen({super.key});
 
@@ -21,11 +23,17 @@ class Clipora2DownloadsScreen extends StatefulWidget {
 
 class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with WidgetsBindingObserver {
   final controller = TextEditingController();
-  final List<_CaptureRequest> _queue = [];
+  final List<_CaptureRequest> _captureQueue = [];
+  final Set<String> _selected = <String>{};
+  final ScrollController _scrollController = ScrollController();
+
   String? clipboardUrl;
-  _CaptureRequest? _active;
-  int _seq = 0;
-  bool _doneBurst = false;
+  String? _error;
+  _CaptureRequest? _activeCapture;
+  List<ResolvedPost> _plan = const [];
+  _StudioStage _stage = _StudioStage.paste;
+  int _captureSeq = 0;
+  bool _showDone = false;
   Timer? _doneTimer;
 
   static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
@@ -44,7 +52,8 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _doneTimer?.cancel();
-    final pending = [if (_active != null) _active!, ..._queue];
+    _scrollController.dispose();
+    final pending = [if (_activeCapture != null) _activeCapture!, ..._captureQueue];
     for (final request in pending) {
       request.timeout?.cancel();
       if (!request.completer.isCompleted) {
@@ -70,7 +79,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       final value = match.group(0)!.replaceAll(RegExp(r'[),.;]+$'), '');
       if (seen.add(value)) urls.add(value);
     }
-    return urls;
+    return urls.take(20).toList(growable: false);
   }
 
   Future<void> _readSharedUrl() async {
@@ -81,6 +90,10 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     setState(() {
       controller.text = urls.join('\n');
       clipboardUrl = urls.first;
+      _stage = _StudioStage.analyze;
+      _plan = const [];
+      _selected.clear();
+      _error = null;
     });
   }
 
@@ -92,57 +105,140 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       clipboardUrl = urls.isEmpty ? null : urls.first;
       if (controller.text.trim().isEmpty && urls.isNotEmpty) {
         controller.text = urls.join('\n');
+        _stage = _StudioStage.analyze;
       }
     });
   }
 
-  Future<void> _save() async {
-    final submitted = controller.text;
-    final urls = _extractUrls(submitted);
+  void _onInputChanged() {
+    setState(() {
+      _plan = const [];
+      _selected.clear();
+      _error = null;
+      _stage = _extractUrls(controller.text).isEmpty ? _StudioStage.paste : _StudioStage.analyze;
+    });
+  }
+
+  Future<void> _analyze() async {
+    final urls = _extractUrls(controller.text);
     if (urls.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Paste or share a supported social link first.')),
-      );
+      _showSnack('Paste or share a supported social link first.');
+      return;
+    }
+
+    HapticFeedback.selectionClick();
+    setState(() {
+      _stage = _StudioStage.analyze;
+      _plan = const [];
+      _selected.clear();
+      _error = null;
+    });
+
+    try {
+      final posts = await context.read<AppState>().scanForMedia(urls, sourceLoader: _captureInBackground);
+      if (!mounted) return;
+      setState(() {
+        _plan = posts;
+        _selected.clear();
+        for (var p = 0; p < posts.length; p++) {
+          for (var m = 0; m < posts[p].media.length; m++) {
+            _selected.add(_key(p, m));
+          }
+        }
+        _stage = _StudioStage.pick;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      if (_scrollController.hasClients) {
+        unawaited(_scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 420),
+          curve: Curves.easeOutCubic,
+        ));
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _cleanError(error);
+        _stage = _StudioStage.analyze;
+      });
+    }
+  }
+
+  Future<void> _saveSelected() async {
+    final selectedPlan = _selectedPlan();
+    if (selectedPlan.isEmpty) {
+      _showSnack('Select at least one media item to save.');
       return;
     }
 
     HapticFeedback.mediumImpact();
-    final ok = await context.read<AppState>().resolveAndDownload(
-      urls,
-      sourceLoader: _captureInBackground,
-    );
-
+    setState(() => _stage = _StudioStage.save);
+    final ok = await context.read<AppState>().saveResolvedMedia(selectedPlan);
     if (!mounted) return;
     if (ok) {
       setState(() {
-        if (controller.text == submitted) {
-          controller.clear();
-          clipboardUrl = null;
-        }
+        controller.clear();
+        clipboardUrl = null;
+        _plan = const [];
+        _selected.clear();
+        _stage = _StudioStage.paste;
+        _error = null;
       });
       _flashDone();
+    } else {
+      setState(() => _stage = _StudioStage.pick);
     }
   }
 
+  String _key(int postIndex, int mediaIndex) => '$postIndex:$mediaIndex';
+
+  int get _selectedCount => _selected.length;
+
+  int get _mediaCount => _plan.fold(0, (sum, post) => sum + post.media.length);
+
+  List<ResolvedPost> _selectedPlan() {
+    final posts = <ResolvedPost>[];
+    for (var p = 0; p < _plan.length; p++) {
+      final post = _plan[p];
+      final media = <ResolvedMedia>[];
+      for (var m = 0; m < post.media.length; m++) {
+        if (_selected.contains(_key(p, m))) media.add(post.media[m]);
+      }
+      if (media.isNotEmpty) {
+        posts.add(ResolvedPost(
+          sourceUrl: post.sourceUrl,
+          postId: post.postId,
+          author: post.author,
+          caption: post.caption,
+          media: media,
+        ));
+      }
+    }
+    return posts;
+  }
+
   Future<String> _captureInBackground(String url) {
-    final request = _CaptureRequest(id: _seq++, url: url, completer: Completer<String>());
+    final request = _CaptureRequest(id: _captureSeq++, url: url, completer: Completer<String>());
     request.timeout = Timer(const Duration(seconds: 46), () {
-      _completeCapture(request, error: StateError('Field capture timed out before the page exposed real media. Open it once in Access, let it play, then retry.'));
+      _completeCapture(
+        request,
+        error: StateError('Field capture timed out before the page exposed real media. Open it once in Access, let it play, then retry.'),
+      );
     });
-    _queue.add(request);
-    _pumpQueue();
+    _captureQueue.add(request);
+    _pumpCaptureQueue();
     return request.completer.future;
   }
 
-  void _pumpQueue() {
-    if (!mounted || _active != null || _queue.isEmpty) return;
-    setState(() => _active = _queue.removeAt(0));
+  void _pumpCaptureQueue() {
+    if (!mounted || _activeCapture != null || _captureQueue.isEmpty) return;
+    setState(() => _activeCapture = _captureQueue.removeAt(0));
   }
 
   void _completeCapture(_CaptureRequest request, {String? source, Object? error}) {
     request.timeout?.cancel();
-    _queue.remove(request);
-    if (_active != request) return;
+    _captureQueue.remove(request);
+    if (_activeCapture != request) return;
     if (!request.completer.isCompleted) {
       if (source != null && source.isNotEmpty) {
         request.completer.complete(source);
@@ -151,17 +247,33 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       }
     }
     if (!mounted) return;
-    setState(() => _active = null);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _pumpQueue());
+    setState(() => _activeCapture = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pumpCaptureQueue());
+  }
+
+  void _completeActiveCapture({String? source, Object? error}) {
+    final active = _activeCapture;
+    if (active == null) return;
+    _completeCapture(active, source: source, error: error);
   }
 
   void _flashDone() {
     _doneTimer?.cancel();
-    setState(() => _doneBurst = true);
-    _doneTimer = Timer(const Duration(milliseconds: 1400), () {
-      if (mounted) setState(() => _doneBurst = false);
+    setState(() => _showDone = true);
+    _doneTimer = Timer(const Duration(milliseconds: 1450), () {
+      if (mounted) setState(() => _showDone = false);
     });
   }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _cleanError(Object error) => error
+      .toString()
+      .replaceFirst('StateError: ', '')
+      .replaceFirst('Bad state: ', '')
+      .replaceFirst('FormatException: ', '');
 
   @override
   Widget build(BuildContext context) {
@@ -172,48 +284,92 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     final recent = app.history.take(4).toList();
 
     return CliporaPage(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 112),
+      padding: EdgeInsets.zero,
       child: Stack(
         children: [
-          const Positioned.fill(child: _AuraBackground()),
+          const Positioned.fill(child: _StudioBackground()),
           Positioned.fill(
             child: ListView(
+              controller: _scrollController,
               physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 118),
               children: [
-                _Header(hasBackend: hasBackend),
-                const SizedBox(height: 14),
-                _CommandCard(
+                _StudioHeader(hasBackend: hasBackend),
+                const SizedBox(height: 18),
+                _StageRail(stage: _stage, hasPlan: _plan.isNotEmpty),
+                const SizedBox(height: 16),
+                _InputPanel(
                   controller: controller,
-                  urls: urls,
+                  urlCount: urls.length,
                   matches: matches,
                   hasBackend: hasBackend,
                   busy: app.busy,
                   clipboardUrl: clipboardUrl,
-                  onChanged: () => setState(() {}),
+                  onChanged: _onInputChanged,
                   onPaste: _readClipboard,
-                  onClear: () => setState(() => controller.clear()),
-                  onSave: _save,
+                  onClear: () {
+                    setState(() {
+                      controller.clear();
+                      _plan = const [];
+                      _selected.clear();
+                      _error = null;
+                      _stage = _StudioStage.paste;
+                    });
+                  },
+                  onAnalyze: _analyze,
                 ),
-                if (app.status != null) ...[
-                  const SizedBox(height: 14),
-                  _LiveStatus(status: app.status!, busy: app.busy, activeJobs: app.activeJobs, hasErrors: app.lastRunHadErrors),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  _ProblemPanel(message: _error!),
                 ],
-                const SizedBox(height: 14),
-                _RouteCard(hasBackend: hasBackend),
-                if (matches.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _PlatformPills(matches: matches, hasBackend: hasBackend),
+                if (app.status != null) ...[
+                  const SizedBox(height: 12),
+                  _LivePanel(status: app.status!, busy: app.busy, hasErrors: app.lastRunHadErrors),
+                ],
+                const SizedBox(height: 16),
+                _ArchitecturePanel(hasBackend: hasBackend),
+                if (_plan.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _PickerPanel(
+                    posts: _plan,
+                    selected: _selected,
+                    selectedCount: _selectedCount,
+                    totalCount: _mediaCount,
+                    busy: app.busy,
+                    onToggle: (key, selected) {
+                      setState(() {
+                        if (selected) {
+                          _selected.add(key);
+                        } else {
+                          _selected.remove(key);
+                        }
+                      });
+                    },
+                    onSelectAll: () {
+                      setState(() {
+                        _selected.clear();
+                        for (var p = 0; p < _plan.length; p++) {
+                          for (var m = 0; m < _plan[p].media.length; m++) {
+                            _selected.add(_key(p, m));
+                          }
+                        }
+                      });
+                    },
+                    onClearSelection: () => setState(_selected.clear),
+                    onSave: _saveSelected,
+                    keyFor: _key,
+                  ),
                 ],
                 if (recent.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  _RecentSaves(recent: recent),
+                  const SizedBox(height: 20),
+                  _RecentPanel(recent: recent),
                 ],
-                const SizedBox(height: 18),
-                const _SafetyCard(),
+                const SizedBox(height: 20),
+                const _CommercialBoundaryPanel(),
               ],
             ),
           ),
-          if (_active != null)
+          if (_activeCapture != null)
             Positioned(
               left: 0,
               top: 0,
@@ -223,50 +379,70 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
                 opacity: 0.01,
                 child: IgnorePointer(
                   child: _HiddenCaptureHost(
-                    key: ValueKey(_active!.id),
-                    url: _active!.url,
-                    onComplete: (source) => _completeCapture(_active!, source: source),
-                    onFailed: (error) => _completeCapture(_active!, error: error),
+                    key: ValueKey(_activeCapture!.id),
+                    url: _activeCapture!.url,
+                    onComplete: (source) => _completeActiveCapture(source: source),
+                    onFailed: (error) => _completeActiveCapture(error: error),
                   ),
                 ),
               ),
             ),
-          if (_doneBurst) const Positioned.fill(child: IgnorePointer(child: _DoneOverlay())),
+          if (_showDone) const Positioned.fill(child: IgnorePointer(child: _DoneOverlay())),
         ],
       ),
     );
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({required this.hasBackend});
+class _StudioHeader extends StatelessWidget {
+  const _StudioHeader({required this.hasBackend});
   final bool hasBackend;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const ThreadVaultMark(size: 40, showGlow: false),
-        const SizedBox(width: 10),
+        const ThreadVaultMark(size: 42, showGlow: false),
+        const SizedBox(width: 12),
         const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Clipora 2.0', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -.7)),
-              Text('Smart Save Command Center', style: TextStyle(color: Colors.white54, fontSize: 12.5, fontWeight: FontWeight.w700)),
-            ],
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Clipora Studio', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
+            SizedBox(height: 3),
+            Text('Analyze. Pick. Save.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
+          ]),
         ),
-        _Badge(icon: hasBackend ? Icons.cloud_done_rounded : Icons.phone_android_rounded, text: hasBackend ? 'Boost' : 'Field'),
+        _ModeBadge(hasBackend: hasBackend),
       ],
     );
   }
 }
 
-class _CommandCard extends StatelessWidget {
-  const _CommandCard({
+class _StageRail extends StatelessWidget {
+  const _StageRail({required this.stage, required this.hasPlan});
+  final _StudioStage stage;
+  final bool hasPlan;
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(children: [
+        _StageDot(label: 'Paste', active: stage == _StudioStage.paste || stage == _StudioStage.analyze || hasPlan, done: stage != _StudioStage.paste),
+        const _StageLine(),
+        _StageDot(label: 'Analyze', active: stage == _StudioStage.analyze || hasPlan, done: hasPlan),
+        const _StageLine(),
+        _StageDot(label: 'Pick', active: stage == _StudioStage.pick || stage == _StudioStage.save, done: stage == _StudioStage.save),
+        const _StageLine(),
+        _StageDot(label: 'Save', active: stage == _StudioStage.save, done: false),
+      ]),
+    );
+  }
+}
+
+class _InputPanel extends StatelessWidget {
+  const _InputPanel({
     required this.controller,
-    required this.urls,
+    required this.urlCount,
     required this.matches,
     required this.hasBackend,
     required this.busy,
@@ -274,11 +450,11 @@ class _CommandCard extends StatelessWidget {
     required this.onChanged,
     required this.onPaste,
     required this.onClear,
-    required this.onSave,
+    required this.onAnalyze,
   });
 
   final TextEditingController controller;
-  final List<String> urls;
+  final int urlCount;
   final List<PlatformMatch> matches;
   final bool hasBackend;
   final bool busy;
@@ -286,283 +462,457 @@ class _CommandCard extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onPaste;
   final VoidCallback onClear;
-  final VoidCallback onSave;
+  final VoidCallback onAnalyze;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return _GlassPanel(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF10182F), Color(0xFF07111F), Color(0xFF090A14)],
-        ),
-        border: Border.all(color: Colors.white.withOpacity(.10)),
-        boxShadow: [BoxShadow(color: const Color(0xFF00F2EA).withOpacity(.11), blurRadius: 34, offset: const Offset(0, 18))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('One tap. Every real item.', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -.5)),
-                    SizedBox(height: 6),
-                    Text('Built for videos, stories, carousels, and multi-post batches.', style: TextStyle(color: Colors.white60, height: 1.35, fontSize: 12.8)),
-                  ],
-                ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Drop a link. Clipora builds a save plan first.', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, letterSpacing: -.55, height: 1.1)),
+              const SizedBox(height: 8),
+              Text(
+                hasBackend
+                    ? 'Resolver Boost follows the yt-dlp style route first. Field capture remains the fallback.'
+                    : 'Field Mode runs on this phone. Add a hosted resolver later for the hardest services.',
+                style: const TextStyle(color: Colors.white60, height: 1.35, fontSize: 13),
               ),
-              _CountRing(count: urls.length),
-            ],
+            ]),
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: controller,
-            minLines: 3,
-            maxLines: 6,
-            onChanged: (_) => onChanged(),
-            style: const TextStyle(fontSize: 14.5, height: 1.35),
-            decoration: InputDecoration(
-              hintText: 'Paste TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, or Threads…',
-              prefixIcon: const Icon(Icons.link_rounded),
-              suffixIcon: controller.text.isEmpty
-                  ? IconButton(tooltip: 'Paste', onPressed: onPaste, icon: const Icon(Icons.content_paste_go_rounded))
-                  : IconButton(tooltip: 'Clear', onPressed: onClear, icon: const Icon(Icons.close_rounded)),
-            ),
+          const SizedBox(width: 14),
+          _MetricTile(value: urlCount == 0 ? '0' : '$urlCount', label: 'links'),
+        ]),
+        const SizedBox(height: 16),
+        TextField(
+          controller: controller,
+          minLines: 4,
+          maxLines: 8,
+          onChanged: (_) => onChanged(),
+          textInputAction: TextInputAction.newline,
+          style: const TextStyle(fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
+            hintText: 'Paste links here — TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, or Threads…',
+            prefixIcon: const Icon(Icons.travel_explore_rounded),
+            suffixIcon: controller.text.trim().isEmpty
+                ? IconButton(tooltip: 'Paste', onPressed: onPaste, icon: const Icon(Icons.content_paste_go_rounded))
+                : IconButton(tooltip: 'Clear', onPressed: onClear, icon: const Icon(Icons.close_rounded)),
           ),
+        ),
+        if (matches.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _MiniStat(icon: Icons.route_rounded, text: hasBackend ? 'Resolver first' : 'Phone first')),
-              const SizedBox(width: 8),
-              const Expanded(child: _MiniStat(icon: Icons.layers_rounded, text: '20 items max')),
-            ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: matches.map((match) => _PlatformBadge(match: match, hasBackend: hasBackend)).toList(growable: false),
           ),
-          const SizedBox(height: 14),
-          CliporaPrimaryButton(
-            onPressed: onSave,
-            height: 56,
-            icon: Icon(busy ? Icons.add_circle_outline_rounded : Icons.download_rounded, color: const Color(0xFF031318)),
-            label: busy
-                ? 'Add another save'
-                : urls.length > 1
-                    ? 'Smart Save ${urls.length} links'
-                    : 'Smart Save',
-          ),
-          if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
-            const SizedBox(height: 10),
-            TextButton.icon(onPressed: onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Paste link from clipboard')),
-          ],
         ],
-      ),
+        const SizedBox(height: 16),
+        _PrimaryAction(
+          icon: Icons.manage_search_rounded,
+          label: busy ? 'Working…' : (urlCount > 1 ? 'Analyze $urlCount links' : 'Analyze link'),
+          onPressed: busy ? null : onAnalyze,
+        ),
+        if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(onPressed: onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Use copied link')),
+          ),
+        ],
+      ]),
     );
   }
 }
 
-class _LiveStatus extends StatelessWidget {
-  const _LiveStatus({required this.status, required this.busy, required this.activeJobs, required this.hasErrors});
+class _ArchitecturePanel extends StatelessWidget {
+  const _ArchitecturePanel({required this.hasBackend});
+  final bool hasBackend;
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassPanel(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.account_tree_rounded, color: Color(0xFF7DD3FC)),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('2.0 engine route', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900))),
+          _SoftTag(text: hasBackend ? 'Resolver Boost' : 'Field Mode'),
+        ]),
+        const SizedBox(height: 14),
+        _RouteRow(index: '01', title: 'Analyze', body: 'Build a media plan before touching storage.'),
+        _RouteRow(index: '02', title: 'Pick', body: 'Show every detected clip/photo so multi-video and carousel posts are visible.'),
+        _RouteRow(index: '03', title: 'Save', body: 'Selected items are byte-checked, downloaded, published, and named cleanly.'),
+      ]),
+    );
+  }
+}
+
+class _PickerPanel extends StatelessWidget {
+  const _PickerPanel({
+    required this.posts,
+    required this.selected,
+    required this.selectedCount,
+    required this.totalCount,
+    required this.busy,
+    required this.onToggle,
+    required this.onSelectAll,
+    required this.onClearSelection,
+    required this.onSave,
+    required this.keyFor,
+  });
+
+  final List<ResolvedPost> posts;
+  final Set<String> selected;
+  final int selectedCount;
+  final int totalCount;
+  final bool busy;
+  final void Function(String key, bool selected) onToggle;
+  final VoidCallback onSelectAll;
+  final VoidCallback onClearSelection;
+  final VoidCallback onSave;
+  final String Function(int postIndex, int mediaIndex) keyFor;
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassPanel(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.dashboard_customize_rounded, color: Color(0xFFA78BFA)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Media picker • $selectedCount/$totalCount selected',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          TextButton(onPressed: onSelectAll, child: const Text('Select all')),
+          TextButton(onPressed: onClearSelection, child: const Text('Clear')),
+        ]),
+        const SizedBox(height: 6),
+        for (var p = 0; p < posts.length; p++) ...[
+          _PostPickerGroup(
+            post: posts[p],
+            postIndex: p,
+            selected: selected,
+            onToggle: onToggle,
+            keyFor: keyFor,
+          ),
+          if (p != posts.length - 1) const SizedBox(height: 10),
+        ],
+        const SizedBox(height: 16),
+        _PrimaryAction(
+          icon: Icons.file_download_done_rounded,
+          label: busy ? 'Saving…' : 'Save selected $selectedCount item${selectedCount == 1 ? '' : 's'}',
+          onPressed: busy || selectedCount == 0 ? null : onSave,
+        ),
+      ]),
+    );
+  }
+}
+
+class _PostPickerGroup extends StatelessWidget {
+  const _PostPickerGroup({required this.post, required this.postIndex, required this.selected, required this.onToggle, required this.keyFor});
+  final ResolvedPost post;
+  final int postIndex;
+  final Set<String> selected;
+  final void Function(String key, bool selected) onToggle;
+  final String Function(int postIndex, int mediaIndex) keyFor;
+
+  @override
+  Widget build(BuildContext context) {
+    final platform = UniversalPlatformDetector.detect(post.sourceUrl);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(.20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(.08)),
+      ),
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+          child: Row(children: [
+            Icon(platform.icon, color: platform.accent, size: 20),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(platform.label, style: const TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 2),
+                Text('${post.author} • ${post.media.length} item${post.media.length == 1 ? '' : 's'}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ]),
+            ),
+            _SoftTag(text: post.media.length > 1 ? 'carousel' : 'single'),
+          ]),
+        ),
+        for (var m = 0; m < post.media.length; m++)
+          _MediaChoice(
+            item: post.media[m],
+            index: m,
+            selected: selected.contains(keyFor(postIndex, m)),
+            onChanged: (value) => onToggle(keyFor(postIndex, m), value ?? false),
+          ),
+      ]),
+    );
+  }
+}
+
+class _MediaChoice extends StatelessWidget {
+  const _MediaChoice({required this.item, required this.index, required this.selected, required this.onChanged});
+  final ResolvedMedia item;
+  final int index;
+  final bool selected;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isVideo = item.kind == MediaKind.video;
+    final label = isVideo ? 'Video clip' : 'Photo slide';
+    final detail = [
+      if (item.width != null && item.height != null) '${item.width}×${item.height}',
+      item.mimeType ?? (isVideo ? 'video/mp4' : 'image'),
+    ].join(' • ');
+    return CheckboxListTile(
+      value: selected,
+      onChanged: onChanged,
+      dense: true,
+      controlAffinity: ListTileControlAffinity.trailing,
+      activeColor: const Color(0xFF00F2EA),
+      secondary: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(colors: isVideo ? const [Color(0xFF0EA5E9), Color(0xFF7C3AED)] : const [Color(0xFF10B981), Color(0xFF0F766E)]),
+        ),
+        child: Icon(isVideo ? Icons.play_arrow_rounded : Icons.image_rounded, color: Colors.white),
+      ),
+      title: Text('$label ${index + 1}', style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+    );
+  }
+}
+
+class _LivePanel extends StatelessWidget {
+  const _LivePanel({required this.status, required this.busy, required this.hasErrors});
   final String status;
   final bool busy;
-  final int activeJobs;
   final bool hasErrors;
 
   @override
   Widget build(BuildContext context) {
     final color = hasErrors ? const Color(0xFFFCA5A5) : const Color(0xFF67E8F9);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(.08),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: color.withOpacity(.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Icon(busy ? Icons.downloading_rounded : hasErrors ? Icons.error_outline_rounded : Icons.check_circle_rounded, color: color),
-            const SizedBox(width: 10),
-            Expanded(child: Text(status, style: const TextStyle(color: Colors.white70, height: 1.35, fontWeight: FontWeight.w700))),
-          ]),
-          if (busy) ...[
-            const SizedBox(height: 12),
-            const ClipRRect(borderRadius: BorderRadius.all(Radius.circular(999)), child: LinearProgressIndicator(minHeight: 6)),
-            const SizedBox(height: 8),
-            Text(activeJobs > 1 ? '$activeJobs saves running — paste another link.' : 'Saving quietly in the background.', style: const TextStyle(color: Colors.white54, fontSize: 12.5)),
-          ],
-        ],
-      ),
+    return _GlassPanel(
+      padding: const EdgeInsets.all(14),
+      borderColor: color.withOpacity(.24),
+      child: Row(children: [
+        Icon(busy ? Icons.sync_rounded : hasErrors ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded, color: color),
+        const SizedBox(width: 10),
+        Expanded(child: Text(status, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, height: 1.35))),
+      ]),
     );
   }
 }
 
-class _RouteCard extends StatelessWidget {
-  const _RouteCard({required this.hasBackend});
-  final bool hasBackend;
+class _ProblemPanel extends StatelessWidget {
+  const _ProblemPanel({required this.message});
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return PremiumCard(
-      padding: const EdgeInsets.all(16),
-      borderRadius: BorderRadius.circular(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.auto_awesome_rounded, color: Color(0xFF8BE9E0)),
-            const SizedBox(width: 9),
-            const Expanded(child: Text('2.0 downloader route', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900))),
-            _Badge(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.shield_rounded, text: hasBackend ? 'Hybrid' : 'Local'),
-          ]),
-          const SizedBox(height: 12),
-          _RouteStep(n: '1', title: 'Detect', body: 'Clipora identifies the platform and chooses the best supported route.'),
-          _RouteStep(n: '2', title: hasBackend ? 'Resolve' : 'Capture', body: hasBackend ? 'Optional resolver handles extractor, cache, and hard CDN cases.' : 'Field Mode captures on this phone without a PC/server.'),
-          const _RouteStep(n: '3', title: 'Save', body: 'Real media bytes are validated, saved to Gallery, and the link box clears.'),
-        ],
-      ),
+    return _GlassPanel(
+      padding: const EdgeInsets.all(14),
+      borderColor: const Color(0xFFFCA5A5).withOpacity(.28),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.report_problem_outlined, color: Color(0xFFFCA5A5)),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: const TextStyle(color: Color(0xFFFFE4E6), height: 1.35, fontWeight: FontWeight.w700))),
+      ]),
     );
   }
 }
 
-class _PlatformPills extends StatelessWidget {
-  const _PlatformPills({required this.matches, required this.hasBackend});
-  final List<PlatformMatch> matches;
-  final bool hasBackend;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: matches.map((match) {
-        final value = !hasBackend
-            ? 'field'
-            : match.isThreads
-                ? 'threads'
-                : match.usesCaptureFallback
-                    ? 'hybrid'
-                    : 'boost';
-        return CliporaPill(icon: match.icon, label: match.label, value: value, color: match.accent);
-      }).toList(growable: false),
-    );
-  }
-}
-
-class _RecentSaves extends StatelessWidget {
-  const _RecentSaves({required this.recent});
+class _RecentPanel extends StatelessWidget {
+  const _RecentPanel({required this.recent});
   final List<DownloadRecord> recent;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Recent saves', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-        const SizedBox(height: 10),
-        ...recent.map((item) {
-          final success = item.status == DownloadStatus.completed;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: PremiumCard(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              borderRadius: BorderRadius.circular(20),
-              child: Row(children: [
-                Icon(item.kind == MediaKind.video ? Icons.play_circle_outline_rounded : Icons.image_outlined, color: success ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5)),
-                const SizedBox(width: 10),
-                Expanded(child: Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
-                Text(success ? 'Saved' : 'Failed', style: TextStyle(fontSize: 12, color: success ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5))),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Latest saves', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+      const SizedBox(height: 10),
+      SizedBox(
+        height: 92,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: recent.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final item = recent[index];
+            final ok = item.status == DownloadStatus.completed;
+            return Container(
+              width: 220,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(.055), borderRadius: BorderRadius.circular(22), border: Border.all(color: Colors.white.withOpacity(.08))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(item.kind == MediaKind.video ? Icons.movie_creation_outlined : Icons.image_outlined, color: ok ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5)),
+                const Spacer(),
+                Text(item.filename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+                Text(ok ? 'Saved' : 'Failed', style: TextStyle(fontSize: 12, color: ok ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5))),
               ]),
-            ),
-          );
-        }),
-      ],
-    );
+            );
+          },
+        ),
+      ),
+    ]);
   }
 }
 
-class _SafetyCard extends StatelessWidget {
-  const _SafetyCard();
+class _CommercialBoundaryPanel extends StatelessWidget {
+  const _CommercialBoundaryPanel();
 
   @override
   Widget build(BuildContext context) {
-    return PremiumCard(
-      padding: const EdgeInsets.all(16),
-      borderRadius: BorderRadius.circular(24),
-      child: const Text(
-        'Commercial-safe boundary: no watermark-removal feature, no password collection, and Threads stays on Clipora’s existing local smart-capture path.',
-        style: TextStyle(color: Colors.white60, height: 1.38, fontSize: 12.8),
+    return const _GlassPanel(
+      child: Text(
+        '2.0 boundary: no watermark-removal, no password collection, no private-access bypass. Threads remains on Clipora’s existing local Smart Capture path.',
+        style: TextStyle(color: Colors.white60, height: 1.38, fontSize: 12.8, fontWeight: FontWeight.w600),
       ),
     );
   }
 }
 
-class _Badge extends StatelessWidget {
-  const _Badge({required this.icon, required this.text});
-  final IconData icon;
-  final String text;
+class _ModeBadge extends StatelessWidget {
+  const _ModeBadge({required this.hasBackend});
+  final bool hasBackend;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(.06), borderRadius: BorderRadius.circular(999), border: Border.all(color: Colors.white.withOpacity(.10))),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: (hasBackend ? const Color(0xFF7C3AED) : const Color(0xFF0EA5E9)).withOpacity(.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(.10)),
+      ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 14, color: const Color(0xFF8BE9E0)),
+        Icon(hasBackend ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 15, color: const Color(0xFFDBEAFE)),
         const SizedBox(width: 6),
-        Text(text, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
+        Text(hasBackend ? 'Boost' : 'Field', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
       ]),
     );
   }
 }
 
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({required this.icon, required this.text});
+class _PlatformBadge extends StatelessWidget {
+  const _PlatformBadge({required this.match, required this.hasBackend});
+  final PlatformMatch match;
+  final bool hasBackend;
+
+  @override
+  Widget build(BuildContext context) {
+    final route = match.isThreads
+        ? 'threads'
+        : hasBackend
+            ? 'resolver'
+            : 'field';
+    return CliporaPill(icon: match.icon, label: match.label, value: route, color: match.accent);
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 74,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0x3322D3EE), Color(0x227C3AED)]),
+        border: Border.all(color: Colors.white.withOpacity(.12)),
+      ),
+      child: Column(children: [
+        Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w800)),
+      ]),
+    );
+  }
+}
+
+class _PrimaryAction extends StatelessWidget {
+  const _PrimaryAction({required this.icon, required this.label, required this.onPressed});
   final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 56,
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(label),
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFFFFFFFF),
+          disabledBackgroundColor: Colors.white.withOpacity(.16),
+          foregroundColor: const Color(0xFF05070D),
+          disabledForegroundColor: Colors.white38,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassPanel extends StatelessWidget {
+  const _GlassPanel({required this.child, this.padding = const EdgeInsets.all(16), this.borderColor});
+  final Widget child;
+  final EdgeInsets padding;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: const Color(0xE60B1020),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: borderColor ?? Colors.white.withOpacity(.09)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(.28), blurRadius: 28, offset: const Offset(0, 18))],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _SoftTag extends StatelessWidget {
+  const _SoftTag({required this.text});
   final String text;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(color: Colors.black.withOpacity(.18), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(.08))),
-      child: Row(children: [
-        Icon(icon, size: 16, color: const Color(0xFF8BE9E0)),
-        const SizedBox(width: 7),
-        Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.8, fontWeight: FontWeight.w700, color: Colors.white70))),
-      ]),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(.06), borderRadius: BorderRadius.circular(999), border: Border.all(color: Colors.white.withOpacity(.08))),
+      child: Text(text, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: Colors.white70)),
     );
   }
 }
 
-class _CountRing extends StatelessWidget {
-  const _CountRing({required this.count});
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = count == 0 ? 0.0 : (count / 20).clamp(0.0, 1.0);
-    return SizedBox(
-      width: 64,
-      height: 64,
-      child: Stack(alignment: Alignment.center, children: [
-        CircularProgressIndicator(value: pct, strokeWidth: 6, backgroundColor: Colors.white.withOpacity(.08)),
-        Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(count == 0 ? 'Go' : '$count', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-          Text(count == 0 ? 'idle' : 'links', style: const TextStyle(fontSize: 9.5, color: Colors.white54, fontWeight: FontWeight.w700)),
-        ]),
-      ]),
-    );
-  }
-}
-
-class _RouteStep extends StatelessWidget {
-  const _RouteStep({required this.n, required this.title, required this.body});
-  final String n;
+class _RouteRow extends StatelessWidget {
+  const _RouteRow({required this.index, required this.title, required this.body});
+  final String index;
   final String title;
   final String body;
 
@@ -571,14 +921,77 @@ class _RouteStep extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(width: 26, height: 26, alignment: Alignment.center, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF00F2EA), Color(0xFF60A5FA)])), child: Text(n, style: const TextStyle(color: Color(0xFF06111C), fontWeight: FontWeight.w900, fontSize: 12))),
-        const SizedBox(width: 10),
+        Text(index, style: const TextStyle(color: Color(0xFF67E8F9), fontWeight: FontWeight.w900, fontSize: 12)),
+        const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 2),
-          Text(body, style: const TextStyle(color: Colors.white54, height: 1.32, fontSize: 12.4)),
+          Text(body, style: const TextStyle(color: Colors.white54, height: 1.33, fontSize: 12.5)),
         ])),
       ]),
+    );
+  }
+}
+
+class _StageDot extends StatelessWidget {
+  const _StageDot({required this.label, required this.active, required this.done});
+  final String label;
+  final bool active;
+  final bool done;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = done ? const Color(0xFF86EFAC) : active ? const Color(0xFF67E8F9) : Colors.white24;
+    return Expanded(
+      child: Column(children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: active ? 14 : 10,
+          height: active ? 14 : 10,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color, boxShadow: active ? [BoxShadow(color: color.withOpacity(.35), blurRadius: 14)] : null),
+          child: done ? const Icon(Icons.check_rounded, size: 10, color: Color(0xFF06111C)) : null,
+        ),
+        const SizedBox(height: 6),
+        Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: active ? Colors.white : Colors.white38)),
+      ]),
+    );
+  }
+}
+
+class _StageLine extends StatelessWidget {
+  const _StageLine();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 18, height: 1, margin: const EdgeInsets.only(bottom: 20), color: Colors.white12);
+  }
+}
+
+class _StudioBackground extends StatelessWidget {
+  const _StudioBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF05070D),
+        gradient: RadialGradient(
+          center: const Alignment(.8, -1.05),
+          radius: 1.25,
+          colors: [const Color(0xFF1D4ED8).withOpacity(.20), const Color(0xFF05070D)],
+        ),
+      ),
+      child: Align(
+        alignment: Alignment.bottomLeft,
+        child: Container(
+          width: 260,
+          height: 260,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(colors: [const Color(0xFF00F2EA).withOpacity(.13), Colors.transparent]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -590,37 +1003,18 @@ class _DoneOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: .72, end: 1),
+        tween: Tween(begin: .82, end: 1),
         duration: const Duration(milliseconds: 420),
         curve: Curves.easeOutBack,
-        builder: (context, value, child) => Opacity(opacity: value.clamp(0.0, 1.0), child: Transform.scale(scale: value, child: child)),
-        child: PremiumCard(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          borderRadius: BorderRadius.circular(28),
+        builder: (context, value, child) => Transform.scale(scale: value, child: child),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(color: const Color(0xFF06111C).withOpacity(.94), borderRadius: BorderRadius.circular(32), border: Border.all(color: const Color(0xFF86EFAC).withOpacity(.45))),
           child: const Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.check_circle_rounded, color: Color(0xFF86EFAC), size: 46),
-            SizedBox(height: 9),
-            Text('Saved to Gallery', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-            SizedBox(height: 4),
-            Text('Ready for the next link', style: TextStyle(color: Colors.white60, fontSize: 12.5)),
+            Icon(Icons.check_circle_rounded, color: Color(0xFF86EFAC), size: 58),
+            SizedBox(height: 10),
+            Text('Saved', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
           ]),
-        ),
-      ),
-    );
-  }
-}
-
-class _AuraBackground extends StatelessWidget {
-  const _AuraBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: RadialGradient(
-          center: const Alignment(.7, -1),
-          radius: 1.2,
-          colors: [const Color(0xFF00F2EA).withOpacity(.14), Colors.transparent],
         ),
       ),
     );
