@@ -37,10 +37,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures {
-        buildConfig = true
-    }
-
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.threadvault.app"
@@ -54,7 +50,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        buildConfigField("String", "CLIPORA_RESOLVER_URL", buildConfigString(cliporaResolverUrl))
+        manifestPlaceholders["cliporaResolverUrl"] = cliporaResolverUrl
     }
 
     buildTypes {
