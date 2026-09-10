@@ -28,7 +28,7 @@ val cliporaResolverUrl = (project.findProperty("CLIPORA_RESOLVER_URL") as String
     ?: ""
 
 android {
-    namespace = "com.threadvault.threadvault"
+    namespace = "com.threadvault.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -43,7 +43,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.threadvault.threadvault"
+        applicationId = "com.threadvault.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
