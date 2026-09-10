@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.5 Share-return instant mode
+- Added the Pinget-style handoff: when a user shares a link to Clipora, the app accepts the link, starts the foreground download service, and sends the user back to the source app after about a quarter second.
+- Kept paste/manual entry as a fallback, but the fastest intended flow is Share -> Clipora -> return immediately while the resolver and Gallery save continue in the background.
+- Added a native Android return-to-source action through the platform channel.
+- Improved Android share parsing so multiple shared URLs can be accepted from one share payload.
+- Kept the resolver-only rule for every supported platform: no in-app social web-player capture.
+- Updated the mobile version to 2.0.5+45.
+
 ## 2.0.4 All-platform resolver-only instant mode
 - Stopped using the old on-phone WebView/Field Mode capture route for every supported platform, including Threads.
 - Clipora Instant now follows one stressless commercial flow for all platforms: paste/share link -> hosted resolver extracts -> APK saves automatically.
@@ -64,32 +72,3 @@
 - Extended download items with platform, source page URL, file size, and quality metadata.
 - Added regression tests for platform detection and media candidate selection.
 - Kept the safety boundary: no platform password collection, no private-access bypassing, and no watermark-removal feature.
-
-## 0.8.3
-- Added autopilot Smart Capture that tries to auto-start Threads videos before requiring user interaction.
-- Kept video-poster guard so video posts wait for a real MP4 instead of saving poster JPG.
-
-## 0.8.2
-- Replaced manual Video/Post/Photos choice with Smart Save and automatic Smart Capture.
-
-## 0.8.1
-- Fixed share-link regression where video posts could be saved as image-only poster snapshots.
-
-## 0.8.0
-- Added 10/10 polish pass, faster resolving, default 5 download lanes, and safer media handling.
-
-## 0.6.0
-- Replaced placeholder mobile shell with a functional local-first download workflow.
-- Added embedded Threads browser resolution for public/private authorized posts.
-- Added `video_versions` parser with DASH fallback.
-- Added image/carousel extraction.
-- Added batch post handling and multiple-media downloads.
-- Added filename templates and caption sidecars.
-- Added persistent on-device history and sharing.
-- Added Threads login/reconnect screen.
-- Added secure session metadata and configurable auto-wipe TTL.
-- Added premium Material 3 navigation and cards.
-- Replaced backend stub provider with real HTTP/HTML parser boundary.
-- Added resolver/session status/health endpoints.
-- Added Docker image and parser regression tests.
-- Added Android application scaffold.
