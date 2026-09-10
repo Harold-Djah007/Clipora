@@ -504,7 +504,7 @@ class _RouteStep extends StatelessWidget {
       const SizedBox(height: 6),
       Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
       const SizedBox(height: 2),
-      Text(body, style: const TextStyle(color: Colors.white45, fontSize: 11, fontWeight: FontWeight.w700)),
+      Text(body, style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
     ]);
   }
 }
