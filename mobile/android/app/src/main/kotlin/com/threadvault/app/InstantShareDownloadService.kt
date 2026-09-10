@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
@@ -128,9 +129,15 @@ class InstantShareDownloadService : Service() {
             ?: ""
         val configured = normalizeBaseUrl(saved)
         if (configured.isNotBlank()) return configured
-        val bundled = normalizeBaseUrl(BuildConfig.CLIPORA_RESOLVER_URL)
+        val bundled = normalizeBaseUrl(bundledResolverUrl())
         if (bundled.isNotBlank()) return bundled
         return normalizeBaseUrl("http://127.0.0.1:8010")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun bundledResolverUrl(): String {
+        val appInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        return appInfo.metaData?.getString(RESOLVER_URL_META_DATA).orEmpty()
     }
 
     private fun resolvePost(baseUrl: String, sourceUrl: String): JSONObject {
@@ -272,6 +279,7 @@ class InstantShareDownloadService : Service() {
         private const val CHANNEL_ID = "clipora_instant_share"
         private const val COMPLETE_CHANNEL_ID = "clipora_instant_share_complete"
         private const val NOTIFICATION_ID = 7117
+        private const val RESOLVER_URL_META_DATA = "com.threadvault.app.CLIPORA_RESOLVER_URL"
 
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
