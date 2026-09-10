@@ -194,10 +194,10 @@ class UniversalProvider:
         elif platform == Platform.YOUTUBE:
             opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv"]}}
         elif platform == Platform.TIKTOK:
-            # Keep a mobile identity while yt-dlp expands vt/vm short links.
-            # curl-cffi then supplies the browser TLS fingerprint requested by
-            # yt-dlp when it loads the canonical TikTok video page.
-            headers["Referer"] = "https://www.tiktok.com/"
+            # Keep the originating TikTok host while yt-dlp expands vt/vm
+            # short links. curl-cffi supplies the browser TLS fingerprint when
+            # yt-dlp subsequently loads the canonical video page.
+            headers["Referer"] = f"https://{urlparse(url).hostname or 'www.tiktok.com'}/"
         elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT}:
             headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
 
