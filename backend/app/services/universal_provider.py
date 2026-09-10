@@ -193,7 +193,13 @@ class UniversalProvider:
             opts["extractor_args"] = {"twitter": {"api": ["syndication"]}}
         elif platform == Platform.YOUTUBE:
             opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv"]}}
-        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT, Platform.TIKTOK}:
+        elif platform == Platform.TIKTOK:
+            # TikTok's current yt-dlp extractor requests curl-cffi browser
+            # impersonation itself. A caller-supplied User-Agent or short-link
+            # Referer defeats that fingerprint and can produce status code 0.
+            headers.pop("User-Agent", None)
+            headers.pop("Referer", None)
+        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT}:
             headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
 
         return opts
