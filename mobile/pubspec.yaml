@@ -1,7 +1,7 @@
 name: threadvault
-description: Clipora premium field-run media saver with one-tap capture, background downloads, carousel saving up to 20 items, optional backend boost, and polished dark UI.
+description: Clipora 2.0 premium smart media saver with one-tap command UX, field capture, optional resolver boost, carousel saving up to 20 items, and commercial-grade dark UI.
 publish_to: 'none'
-version: 0.8.7+32
+version: 2.0.0+40
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
