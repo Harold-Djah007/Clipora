@@ -83,6 +83,66 @@ def test_snapchat_story_entries_are_not_collapsed_to_one_item():
     assert [item.media_type for item in media] == ["image", "video"]
 
 
+def test_extracts_nested_story_media_urls_like_server_downloader_apis():
+    provider = UniversalProvider()
+    info = {
+        "id": "story-1",
+        "snapList": [
+            {"mediaUrl": "https://cf-st.sc-cdn.net/snap/video-token?mime=video_mp4", "width": 1080, "height": 1920},
+            {"imageUrl": "https://cf-st.sc-cdn.net/snap/photo.webp?mime=image", "width": 1080, "height": 1920},
+        ],
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.media_type for item in media] == ["video"]
+    assert media[0].url.startswith("https://cf-st.sc-cdn.net/snap/video-token")
+
+
+def test_photo_carousel_keeps_multiple_images_when_no_video_hint_exists():
+    provider = UniversalProvider()
+    info = {
+        "items": [
+            {"display_url": "https://cdn.example/slide-1.jpg", "width": 1080, "height": 1350},
+            {"display_url": "https://cdn.example/slide-2.jpg", "width": 1080, "height": 1350},
+        ],
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.url for item in media] == ["https://cdn.example/slide-1.jpg", "https://cdn.example/slide-2.jpg"]
+
+
+def test_video_format_variants_keep_best_quality_only():
+    provider = UniversalProvider()
+    info = {
+        "formats": [
+            {"url": "https://video.example/clip.mp4?token=low", "ext": "mp4", "height": 360, "width": 640},
+            {"url": "https://video.example/clip.mp4?token=high", "ext": "mp4", "height": 1080, "width": 1920},
+        ]
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert len(media) == 1
+    assert media[0].height == 1080
+    assert media[0].url.endswith("token=high")
+
+
+def test_dedupe_uses_host_and_path_for_signed_media_tokens():
+    provider = UniversalProvider()
+    items = [
+        provider._media_from_url("https://cdn.example/path/video.mp4?token=old", key_hint="video", width=640, height=360),
+        provider._media_from_url("https://cdn.example/path/video.mp4?token=new", key_hint="video", width=1080, height=1920),
+    ]
+
+    media = provider._dedupe_media([item for item in items if item])
+
+    assert len(media) == 1
+    assert media[0].height == 1920
+    assert media[0].url.endswith("token=new")
+
+
 def test_metadata_retry_is_used_for_format_only_failures():
     assert UniversalProvider._should_retry_without_format(Exception("Requested format is not available")) is True
     assert UniversalProvider._should_retry_without_format(Exception("No video could be found in this tweet")) is True
