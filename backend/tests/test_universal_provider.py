@@ -102,6 +102,6 @@ def test_tiktok_preserves_mobile_short_link_identity():
     headers = opts["http_headers"]
 
     assert "Android 13" in headers["User-Agent"]
-    assert headers["Referer"] == "https://www.tiktok.com/"
+    assert headers["Referer"] == "https://vt.tiktok.com/"
     assert headers["Accept-Language"] == "en-US,en;q=0.9"
 
