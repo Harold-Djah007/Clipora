@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.4 All-platform resolver-only instant mode
+- Stopped using the old on-phone WebView/Field Mode capture route for every supported platform, including Threads.
+- Clipora Instant now follows one stressless commercial flow for all platforms: paste/share link -> hosted resolver extracts -> APK saves automatically.
+- Removed the hidden capture host from the instant downloader screen so normal saves cannot switch into a social web-player page.
+- Added support for a bundled resolver URL through `--dart-define=CLIPORA_RESOLVER_URL=...` so release APKs can ship already connected instead of asking users to configure a server.
+- Updated the mobile version to 2.0.4+44.
+
 ## 2.0.3 Resolver-only non-Threads instant route
 - Stopped using the old on-phone WebView/Field Mode capture fallback for non-Threads platforms.
 - TikTok, Instagram, X/Twitter, Pinterest, Facebook, Snapchat, and YouTube now require the Clipora resolver route so they can behave like a paste-to-download app instead of opening/scanning web players inside the APK.
