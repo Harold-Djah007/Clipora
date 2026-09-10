@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.universal_provider import UniversalProvider
+from app.services.universal_provider import UniversalMedia, UniversalProvider
 
 
 def test_extract_highest_direct_mp4_format():
@@ -165,3 +165,178 @@ def test_tiktok_short_link_expansion_rejects_homepage_redirect(monkeypatch):
     monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
     short = "https://vt.tiktok.com/ZSgU4uAMT/"
     assert provider._expand_tiktok_short_url(short) == short
+
+
+def test_tiktok_short_link_follows_location_header_without_following_homepage(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSqU4uAMT/"
+    canonical = "https://www.tiktok.com/@creator/video/7682000490246262048"
+
+    class Response:
+        def __init__(self, url, location=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "vt.tiktok.com" in url:
+                return Response(url, location=canonical)
+            return Response(url)
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_tiktok_short_url(short) == canonical
+
+
+def test_tiktok_short_link_parses_video_id_from_homepage_html(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSqU4uAMT/"
+
+    class Response:
+        def __init__(self, url, location="", text=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = text
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "vt.tiktok.com" in url:
+                return Response(url, location="https://www.tiktok.com/?_r=1")
+            return Response(
+                "https://www.tiktok.com/?_r=1",
+                text='<link rel="canonical" href="https://www.tiktok.com/@creator/video/7682000490246262048">',
+            )
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_tiktok_short_url(short) == "https://www.tiktok.com/@creator/video/7682000490246262048"
+
+
+def test_tiktok_webpage_download_is_enabled_for_photo_posts():
+    provider = UniversalProvider()
+    opts = provider._ydl_opts_for("https://www.tiktok.com/@creator/photo/1234567890123456789")
+    assert opts["extractor_args"]["tiktok"]["webpage_download"] == ["True"]
+    assert "User-Agent" not in opts["http_headers"]
+
+
+def test_tiktok_slideshow_images_when_no_video_exists():
+    provider = UniversalProvider()
+    info = {
+        "image_post_info": {
+            "images": [
+                {"imageURL": {"urlList": ["https://p16-sign.tiktokcdn.com/tos-a.jpeg"]}},
+                {"display_image": {"url_list": ["https://p16-sign.tiktokcdn.com/tos-b.jpeg"]}},
+            ]
+        }
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.url for item in media] == [
+        "https://p16-sign.tiktokcdn.com/tos-a.jpeg",
+        "https://p16-sign.tiktokcdn.com/tos-b.jpeg",
+    ]
+    assert all(item.media_type == "image" for item in media)
+
+
+def test_instagram_carousel_media_keeps_each_slide():
+    provider = UniversalProvider()
+    info = {
+        "carousel_media": [
+            {
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/a.jpg", "width": 320, "height": 320},
+                        {"url": "https://scontent.cdninstagram.com/v/t51/a-1080.jpg", "width": 1080, "height": 1080},
+                    ]
+                }
+            },
+            {
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/b.jpg", "width": 1080, "height": 1350},
+                    ]
+                }
+            },
+        ]
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.url for item in media] == [
+        "https://scontent.cdninstagram.com/v/t51/a-1080.jpg",
+        "https://scontent.cdninstagram.com/v/t51/b.jpg",
+    ]
+
+
+def test_tiktok_photo_images_are_not_used_when_video_exists():
+    provider = UniversalProvider()
+    info = {
+        "formats": [
+            {"url": "https://cdn.example/video.mp4", "ext": "mp4", "vcodec": "h264", "height": 720, "width": 1280},
+        ],
+        "images": ["https://cdn.example/slide.jpg"],
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert len(media) == 1
+    assert media[0].media_type == "video"
+    assert media[0].url.endswith("video.mp4")
+
+
+def test_tiktok_download_fallback_when_metadata_has_no_media(monkeypatch):
+    provider = UniversalProvider()
+    info = {"id": "7682000490246262048", "uploader": "creator", "title": "clip"}
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/abc", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.tiktok.com/@creator/video/7682000490246262048"))
+
+    assert post.media[0].url == "/api/files/abc"
+    assert post.platform == "tiktok"
+
+
+def test_tiktok_download_fallback_when_extract_raises(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_expand_tiktok_short_url",
+        lambda url: "https://www.tiktok.com/@creator/video/7682000490246262048",
+    )
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(RuntimeError("")))
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/fallback", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://vt.tiktok.com/ZSqU4uAMT/"))
+
+    assert post.media[0].url == "/api/files/fallback"
+    assert post.platform == "tiktok"

@@ -176,7 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (v) => _update(s.copyWith(maxConcurrentDownloads: v.round())),
               ),
               const Text(
-                'Higher values finish carousels sooner. Lower them on a weak connection.',
+                'Higher values finish carousels sooner. Lower them on a weak connection. Clipora uses a background download notification, then a heads-up result for both successful saves and failures.',
                 style: TextStyle(color: Colors.white54, height: 1.3),
               ),
               const SizedBox(height: 8),

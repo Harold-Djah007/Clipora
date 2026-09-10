@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
@@ -47,14 +47,24 @@ class UniversalProvider:
     """Safe resolver provider for Clipora's universal saver direction.
 
     Threads deliberately remains on Clipora's dedicated public-page resolver. All other
-    supported services go through a mature extractor-style pipeline inspired by proven
-    open-source downloaders: try site metadata, preserve playlist/carousel entries,
-    inspect nested media URLs, proxy videos through the backend cache when needed,
-    and avoid poster-only false positives.
+    supported services go through yt-dlp: expand the public URL, extract metadata, keep
+    playlist/carousel entries, then tunnel files through `/api/files` when the phone
+    cannot fetch them. Photo slideshows use gallery-dl-style image lists rather than
+    video posters.
     """
 
     _MAX_PLAYLIST_MEDIA = 20
     _MAX_DEEP_SCAN_NODES = 5000
+    _TIKTOK_SHORT_HOSTS = {"vt.tiktok.com", "vm.tiktok.com"}
+    _TIKTOK_MEDIA_PATH = re.compile(
+        r"/(?:@(?P<user>[^/]+)/)?(?P<kind>video|photo)/(?P<id>\d{8,30})",
+        re.I,
+    )
+    _TIKTOK_MOBILE_V = re.compile(r"/v/(?P<id>\d{8,30})", re.I)
+    _TIKTOK_AWEME = re.compile(
+        r"""(?:aweme_id|itemId|item_id|video_id)["']?\s*[:=]\s*["']?(?P<id>\d{8,30})""",
+        re.I,
+    )
 
     _ydl_opts: dict[str, Any] = {
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
@@ -111,17 +121,35 @@ class UniversalProvider:
         )
 
     async def _resolve_with_ytdlp(self, url: str) -> UniversalPost:
-        if yt_dlp is None:
-            raise RuntimeError("yt-dlp is not installed. Run: pip install -r backend/requirements.txt")
-
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, self._extract_info, url)
         platform_info = ensure_supported_platform(url)
+        source_url = self._expand_tiktok_short_url(url) if platform_info.platform == Platform.TIKTOK else url
+        loop = asyncio.get_running_loop()
+        try:
+            info = await loop.run_in_executor(None, self._extract_info, source_url)
+        except Exception as extract_error:
+            if platform_info.platform == Platform.TIKTOK:
+                stub = {"id": self._post_id_from_url(source_url) or "clipora", "uploader": "tiktok"}
+                try:
+                    media = await loop.run_in_executor(None, self._download_to_cache, source_url, stub, 1)
+                except Exception:
+                    media = []
+                if media:
+                    return UniversalPost(
+                        post_id=safe_filename_part(str(stub["id"])),
+                        author="tiktok",
+                        platform=platform_info.platform.value,
+                        source_url=url,
+                        title=None,
+                        caption=None,
+                        media=media,
+                    )
+            raise extract_error
+
         entries = self._entry_infos(info)
 
         media: list[UniversalMedia] = []
         for index, entry in enumerate(entries[: self._MAX_PLAYLIST_MEDIA], start=1):
-            entry_url = self._entry_url(entry, url)
+            entry_url = self._entry_url(entry, source_url)
             entry_media = self._extract_media_items(entry)
             video_like = self._has_video_like_format(entry, self._formats(entry)) or any(
                 item.media_type == "video" for item in entry_media
@@ -129,8 +157,8 @@ class UniversalProvider:
 
             if video_like:
                 try:
-                    # This avoids mobile 403/HLS issues by letting the backend fetch
-                    # the file and exposing it to the phone as /api/files/{token}.
+                    # Tunnel the file through the backend so the phone does not have to
+                    # fetch CDN/HLS URLs that 403 outside a browser session.
                     entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
                 except Exception:
                     if not entry_media:
@@ -142,7 +170,19 @@ class UniversalProvider:
             media.extend(entry_media)
 
         media = self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA]
+        if not media and platform_info.platform == Platform.TIKTOK:
+            try:
+                media = await loop.run_in_executor(
+                    None, self._download_to_cache, self._entry_url(info, source_url), info, 1
+                )
+            except Exception:
+                media = []
         if not media:
+            if platform_info.platform == Platform.TIKTOK:
+                raise ValueError(
+                    "TikTok did not return a public video or photo file for this link. "
+                    "Open the post in TikTok, tap Share, and send it to Clipora again."
+                )
             raise ValueError("No downloadable MP4/image media found for this link.")
 
         post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora"))
@@ -164,20 +204,29 @@ class UniversalProvider:
         platform = detect_platform(url).platform
         allow_playlist = platform not in {Platform.THREADS, Platform.YOUTUBE}
         extractor_url = self._expand_tiktok_short_url(url) if platform == Platform.TIKTOK else url
-        opts = self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)
-        attempts = [(extractor_url, opts)]
+        attempts: list[tuple[str, dict[str, Any]]] = []
         if platform == Platform.TIKTOK:
-            # Let yt-dlp/curl-cffi use its own browser profile. A forced mobile UA
-            # or short-link Referer can make TikTok redirect to `/?_r=1`.
-            browser_opts = dict(opts)
-            browser_opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
-            browser_opts["impersonate"] = "chrome"
-            attempts.append((url, browser_opts))
+            urls_to_try: list[str] = []
+            for candidate in (extractor_url, url):
+                if candidate not in urls_to_try:
+                    urls_to_try.append(candidate)
+            for attempt_url in urls_to_try:
+                for impersonate in ("chrome", "chrome120"):
+                    attempt_opts = self._ydl_opts_for(attempt_url, allow_playlist=allow_playlist)
+                    attempt_opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
+                    attempt_opts["impersonate"] = impersonate
+                    attempts.append((attempt_url, attempt_opts))
+            attempts.append((extractor_url, self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)))
+        else:
+            attempts.append((extractor_url, self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)))
 
         last_error: Exception | None = None
         for attempt_url, attempt_opts in attempts:
             try:
-                return self._extract_info_with_opts(attempt_url, attempt_opts)
+                info = self._extract_info_with_opts(attempt_url, attempt_opts)
+                if self._extracted_info_usable(info):
+                    return info
+                last_error = ValueError(f"yt-dlp returned no downloadable media for this {platform.value} link.")
             except Exception as exc:
                 last_error = exc
                 if self._should_retry_without_format(exc):
@@ -185,42 +234,118 @@ class UniversalProvider:
                     fallback_opts.pop("format", None)
                     fallback_opts["skip_download"] = True
                     try:
-                        return self._extract_info_with_opts(attempt_url, fallback_opts)
+                        info = self._extract_info_with_opts(attempt_url, fallback_opts)
+                        if self._extracted_info_usable(info):
+                            return info
+                        last_error = ValueError(
+                            f"yt-dlp returned no downloadable media for this {platform.value} link."
+                        )
                     except Exception as fallback_error:
                         last_error = fallback_error
-        assert last_error is not None
-        raise last_error
+        if last_error is None:
+            detail = "unknown error"
+        else:
+            detail = str(last_error).strip() or type(last_error).__name__
+        raise ValueError(
+            f"yt-dlp could not extract media from this {platform.value} link. {detail}"
+        ) from last_error
 
-    @staticmethod
-    def _expand_tiktok_short_url(url: str) -> str:
-        """Resolve vt/vm links before extraction without accepting off-site redirects."""
-
+    @classmethod
+    def _is_tiktok_short_url(cls, url: str) -> bool:
         parsed = urlparse(url)
-        if (parsed.hostname or "").lower() not in {"vt.tiktok.com", "vm.tiktok.com"}:
-            return url
+        host = (parsed.hostname or "").lower()
+        path = parsed.path or ""
+        if host in cls._TIKTOK_SHORT_HOSTS:
+            return True
+        return host.endswith("tiktok.com") and path.startswith("/t/")
+
+    @classmethod
+    def _canonical_tiktok_media_url(cls, candidate: str) -> Optional[str]:
+        if not candidate:
+            return None
+        parsed = urlparse(candidate.strip())
+        host = (parsed.hostname or "").lower()
+        if "tiktok.com" not in host:
+            return None
+        match = cls._TIKTOK_MEDIA_PATH.search(parsed.path or "")
+        if match:
+            user = match.group("user")
+            kind = match.group("kind").lower()
+            media_id = match.group("id")
+            if user:
+                return f"https://www.tiktok.com/@{user}/{kind}/{media_id}"
+            return f"https://www.tiktok.com/{kind}/{media_id}"
+        mobile = cls._TIKTOK_MOBILE_V.search(parsed.path or "")
+        if mobile:
+            return f"https://www.tiktok.com/video/{mobile.group('id')}"
+        return None
+
+    @classmethod
+    def _tiktok_canonical_from_text(cls, text: str) -> Optional[str]:
+        if not text:
+            return None
+        for match in re.findall(
+            r"https?://(?:www\.|m\.)?tiktok\.com/@[^/\s\"'<>]+/(?:video|photo)/\d{8,30}",
+            text,
+            flags=re.I,
+        ):
+            canonical = cls._canonical_tiktok_media_url(match)
+            if canonical:
+                return canonical
+        aweme = cls._TIKTOK_AWEME.search(text)
+        if aweme:
+            return f"https://www.tiktok.com/video/{aweme.group('id')}"
+        return None
+
+    @classmethod
+    def _expand_tiktok_short_url(cls, url: str) -> str:
+        """Resolve vt/vm/`/t/` links hop-by-hop without accepting homepage or off-site redirects."""
+
+        if not cls._is_tiktok_short_url(url):
+            return cls._canonical_tiktok_media_url(url) or url
 
         profiles = (
-            {"User-Agent": "facebookexternalhit/1.1"},
+            {"User-Agent": "facebookexternalhit/1.1", "Accept": "text/html,*/*"},
+            {"User-Agent": "Twitterbot/1.0", "Accept": "text/html,*/*"},
             {
                 "User-Agent": (
-                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
             },
         )
         for headers in profiles:
+            current = url
+            seen: set[str] = set()
             try:
-                with httpx.Client(follow_redirects=True, timeout=8.0, headers=headers) as client:
-                    response = client.get(url)
-                candidates = [str(response.url), response.headers.get("location", "")]
-                candidates.extend(re.findall(r"https://(?:www\.)?tiktok\.com/@[^\s\"']+/(?:video|photo)/\d+", response.text))
-                for candidate in candidates:
-                    target = urlparse(candidate)
-                    host = (target.hostname or "").lower()
-                    if host == "tiktok.com" or host.endswith(".tiktok.com"):
-                        if re.search(r"/(?:video|photo)/\d+", target.path):
-                            return candidate
+                with httpx.Client(follow_redirects=False, timeout=10.0, headers=headers) as client:
+                    for _ in range(8):
+                        if current in seen:
+                            break
+                        seen.add(current)
+                        response = client.get(current)
+                        location = str(response.headers.get("location") or "").strip()
+                        try:
+                            body = response.text or ""
+                        except Exception:
+                            body = ""
+                        for blob in (str(response.url), location):
+                            if not blob:
+                                continue
+                            canonical = cls._canonical_tiktok_media_url(urljoin(current, blob))
+                            if canonical:
+                                return canonical
+                        canonical = cls._tiktok_canonical_from_text(" ".join([str(response.url), location, body]))
+                        if canonical:
+                            return canonical
+                        if not location:
+                            break
+                        nxt = urljoin(current, location)
+                        nxt_host = (urlparse(nxt).hostname or "").lower()
+                        if "tiktok.com" not in nxt_host:
+                            break
+                        current = nxt
             except (httpx.HTTPError, ValueError):
                 continue
         return url
@@ -244,9 +369,10 @@ class UniversalProvider:
         elif platform == Platform.YOUTUBE:
             opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv"]}}
         elif platform == Platform.TIKTOK:
-            # TikTok's extractor owns its User-Agent, Referer and browser
-            # impersonation. Overriding them breaks vt/vm short-link expansion.
+            # TikTok's extractor owns its User-Agent and Referer. webpage_download
+            # helps photo slideshows that have no playable video format.
             headers.pop("User-Agent", None)
+            opts["extractor_args"] = {"tiktok": {"webpage_download": ["True"]}}
         elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT}:
             headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
 
@@ -260,7 +386,16 @@ class UniversalProvider:
             or "requested format not available" in text
             or "no video could be found" in text
             or "no video formats found" in text
+            or "no images found" in text
         )
+
+    @staticmethod
+    def _extracted_info_usable(info: dict[str, Any]) -> bool:
+        if info.get("entries") or info.get("formats") or info.get("requested_formats"):
+            return True
+        if info.get("url") or info.get("images") or info.get("image_post_info") or info.get("carousel_media"):
+            return True
+        return bool(info.get("imagePostInfo") or info.get("aweme_detail"))
 
     def _entry_infos(self, info: dict[str, Any]) -> list[dict[str, Any]]:
         raw_entries = info.get("entries")
@@ -334,6 +469,10 @@ class UniversalProvider:
         if self._has_video_like_format(info, formats):
             return []
 
+        slideshow = self._slideshow_media(info)
+        if slideshow:
+            return slideshow[: self._MAX_PLAYLIST_MEDIA]
+
         image_candidates: list[UniversalMedia] = []
         if direct_image and direct_image.media_type == "image":
             image_candidates.append(direct_image)
@@ -360,6 +499,105 @@ class UniversalProvider:
         image_candidates.sort(key=self._media_rank, reverse=True)
         return image_candidates[:1]
 
+    def _slideshow_media(self, info: dict[str, Any]) -> list[UniversalMedia]:
+        """Keep photo carousels/slideshows when yt-dlp has no playable video."""
+
+        items: list[UniversalMedia] = []
+        images = info.get("images")
+        if isinstance(images, list):
+            for image in images:
+                media = self._media_from_image_node(image, key_hint="image_url slideshow")
+                if media:
+                    items.append(media)
+
+        for slide in self._iter_image_post_slides(info):
+            media = self._media_from_image_node(slide, key_hint="image_url photomode")
+            if media:
+                items.append(media)
+
+        carousel = info.get("carousel_media")
+        if isinstance(carousel, list):
+            for slide in carousel:
+                if not isinstance(slide, dict):
+                    continue
+                if self._has_video_like_format(slide, self._formats(slide)):
+                    continue
+                media = self._best_carousel_image(slide)
+                if media:
+                    items.append(media)
+
+        sidecar = info.get("edge_sidecar_to_children")
+        if isinstance(sidecar, dict):
+            edges = sidecar.get("edges")
+            if isinstance(edges, list):
+                for edge in edges:
+                    node = edge.get("node") if isinstance(edge, dict) else None
+                    if isinstance(node, dict):
+                        media = self._best_carousel_image(node)
+                        if media:
+                            items.append(media)
+
+        return self._dedupe_media(items)[: self._MAX_PLAYLIST_MEDIA]
+
+    def _iter_image_post_slides(self, info: dict[str, Any]) -> list[Any]:
+        slides: list[Any] = []
+        nodes: list[Any] = [info.get("image_post_info"), info.get("imagePostInfo")]
+        aweme = info.get("aweme_detail")
+        if isinstance(aweme, dict):
+            nodes.append(aweme.get("image_post_info") or aweme.get("imagePostInfo"))
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            images = node.get("images") or node.get("image_list") or []
+            if isinstance(images, list):
+                slides.extend(images)
+        return slides
+
+    def _media_from_image_node(self, node: Any, key_hint: str) -> Optional[UniversalMedia]:
+        if isinstance(node, str):
+            media = self._media_from_url(node, key_hint=key_hint)
+            return media if media and media.media_type == "image" else None
+        if not isinstance(node, dict):
+            return None
+        width = node.get("width")
+        height = node.get("height")
+        for key in ("url", "image", "display_url", "src"):
+            value = node.get(key)
+            if isinstance(value, str):
+                media = self._media_from_url(value, key_hint=key_hint, width=width, height=height)
+                if media and media.media_type == "image":
+                    return media
+        for nested_key in ("imageURL", "image_url", "display_image", "displayImage"):
+            nested = node.get(nested_key)
+            media = self._media_from_image_node(nested, key_hint=f"{key_hint} {nested_key}")
+            if media:
+                return media
+        for list_key in ("urlList", "url_list", "urls", "candidates"):
+            values = node.get(list_key)
+            if isinstance(values, list):
+                for value in values:
+                    media = self._media_from_image_node(value, key_hint=f"{key_hint} {list_key}")
+                    if media:
+                        return media
+        return None
+
+    def _best_carousel_image(self, slide: dict[str, Any]) -> Optional[UniversalMedia]:
+        versions = slide.get("image_versions2")
+        if isinstance(versions, dict):
+            candidates = versions.get("candidates")
+            if isinstance(candidates, list):
+                ranked = [item for item in candidates if isinstance(item, dict)]
+                ranked.sort(
+                    key=lambda item: (self._int_or_none(item.get("width")) or 0)
+                    * (self._int_or_none(item.get("height")) or 0),
+                    reverse=True,
+                )
+                for candidate in ranked:
+                    media = self._media_from_image_node(candidate, key_hint="carousel_media display_url")
+                    if media:
+                        return media
+        return self._media_from_image_node(slide, key_hint="carousel_media image_url")
+
     @staticmethod
     def _formats(info: dict[str, Any]) -> list[dict[str, Any]]:
         return [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
@@ -380,15 +618,31 @@ class UniversalProvider:
             "noprogress": True,
             "socket_timeout": 45,
         }
+        if detect_platform(url).platform == Platform.TIKTOK:
+            opts["impersonate"] = "chrome"
+            opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
                 downloaded = ydl.extract_info(url, download=True)
         except Exception as exc:
-            raise ValueError(
-                "No direct MP4 was available, and HLS/direct file fallback failed. "
-                "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
-                f"Detail: {exc}"
-            ) from exc
+            if opts.get("impersonate"):
+                retry_opts = dict(opts)
+                retry_opts.pop("impersonate", None)
+                try:
+                    with yt_dlp.YoutubeDL(retry_opts) as ydl:  # type: ignore[union-attr]
+                        downloaded = ydl.extract_info(url, download=True)
+                except Exception as retry_error:
+                    raise ValueError(
+                        "No direct MP4 was available, and HLS/direct file fallback failed. "
+                        "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
+                        f"Detail: {retry_error}"
+                    ) from retry_error
+            else:
+                raise ValueError(
+                    "No direct MP4 was available, and HLS/direct file fallback failed. "
+                    "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
+                    f"Detail: {exc}"
+                ) from exc
 
         if isinstance(downloaded, dict) and downloaded.get("entries"):
             downloaded = next((entry for entry in downloaded["entries"] if entry), downloaded)
@@ -644,6 +898,11 @@ class UniversalProvider:
                 or "display_url" in hint
                 or "thumbnail" in hint
                 or "og:image" in hint
+                or "url_list" in hint
+                or "urllist" in hint
+                or "carousel" in hint
+                or "photomode" in hint
+                or ("tiktokcdn" in lower and any(token in hint for token in ("image", "photo", "display", "slide")))
             )
         )
 

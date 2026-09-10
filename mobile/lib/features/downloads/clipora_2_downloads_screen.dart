@@ -378,7 +378,7 @@ class _ShareFirstPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Fastest flow: tap Share in the social app → Clipora → you are sent back while the download notification continues.',
+          'Fastest flow: tap Share in the social app → Clipora → you are sent back. Clipora posts a notification for both successful saves and failures while you are out of the app. Allow notifications when Android asks.',
           style: TextStyle(color: Colors.white.withOpacity(.52), height: 1.35, fontSize: 12.3, fontWeight: FontWeight.w600),
         ),
         if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[

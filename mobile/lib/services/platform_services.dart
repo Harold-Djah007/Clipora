@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class PlatformServices {
@@ -58,7 +59,9 @@ class PlatformServices {
         'message': message,
         'success': success,
       });
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('[Clipora] could not show download notification: $error');
+    }
   }
 
   static Future<void> stopDownloadService() async {

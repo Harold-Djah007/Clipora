@@ -295,10 +295,13 @@ class InstantShareDownloadService : Service() {
     }
 
     private fun completeNotification(title: String, message: String, success: Boolean) {
-        ensureChannels(this)
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val id = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
-        manager.notify(id, completeNotificationBuilder(title, message, success))
+        CliporaNotifications.notifyResult(
+            this,
+            title,
+            message,
+            success,
+            avoidIds = intArrayOf(NOTIFICATION_ID),
+        )
     }
 
     private fun progressNotification(message: String): Notification {
@@ -311,19 +314,6 @@ class InstantShareDownloadService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_PROGRESS)
-            .build()
-    }
-
-    private fun completeNotificationBuilder(title: String, message: String, success: Boolean): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, COMPLETE_CHANNEL_ID) else Notification.Builder(this)
-        return builder
-            .setContentTitle(title)
-            .setContentText(message)
-            .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentIntent(launchPendingIntent())
-            .setOngoing(false)
-            .setAutoCancel(true)
-            .setCategory(Notification.CATEGORY_STATUS)
             .build()
     }
 
@@ -348,7 +338,6 @@ class InstantShareDownloadService : Service() {
         const val EXTRA_URL = "url"
         const val EXTRA_URLS = "urls"
         private const val CHANNEL_ID = "clipora_instant_share"
-        private const val COMPLETE_CHANNEL_ID = "clipora_instant_share_complete"
         private const val NOTIFICATION_ID = 7117
 
         fun ensureChannels(context: Context) {
@@ -360,12 +349,7 @@ class InstantShareDownloadService : Service() {
                     setShowBadge(false)
                 }
             )
-            manager.createNotificationChannel(
-                NotificationChannel(COMPLETE_CHANNEL_ID, "Clipora instant save complete", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Shows when a shared link has finished saving."
-                    setShowBadge(true)
-                }
-            )
+            CliporaNotifications.ensureResultChannel(context)
         }
 
         private fun extractFirstUrl(raw: String): String? {
@@ -412,8 +396,15 @@ class InstantShareDownloadService : Service() {
                 .replace(Regex("\\s+"), " ")
                 .replace(Regex("^(?:ERROR:\\s*)+", RegexOption.IGNORE_CASE), "")
                 .trim()
-            if (text.contains("tiktok.com/?_r=1", ignoreCase = true) || text.contains("status code 0", ignoreCase = true)) {
-                return "TikTok did not release this video to the resolver. Retry, or use a hosted resolver."
+            if (text.contains("tiktok.com/?_r=1", ignoreCase = true) ||
+                text.contains("status code 0", ignoreCase = true) ||
+                text.contains("tiktok", ignoreCase = true) && (
+                    text.isBlank() ||
+                        text.contains("could not extract", ignoreCase = true) ||
+                        text.contains("no downloadable", ignoreCase = true)
+                    )
+            ) {
+                return "TikTok did not return a public video or photo file for this link. Open the post in TikTok, tap Share, and send it to Clipora again."
             }
             if (text.isBlank()) return "The resolver could not extract downloadable media from this link."
             return if (text.length <= 280) text else text.take(279).trimEnd() + "…"
