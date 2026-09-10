@@ -24,6 +24,16 @@ def test_public_error_explains_empty_tiktok_failure():
     assert "Open the post in TikTok" in message
 
 
+def test_public_error_explains_instagram_extract_failure():
+    message = public_resolver_error(ValueError("yt-dlp could not extract media from this instagram link."))
+    assert message.startswith("Instagram did not return")
+
+
+def test_public_error_explains_threads_failure():
+    message = public_resolver_error(ValueError("Threads did not return a public photo or video for this link."))
+    assert message.startswith("Threads did not return")
+
+
 def test_public_error_empty_text_still_has_fallback():
     message = public_resolver_error(RuntimeError("ERROR:"))
     assert message == "The resolver could not extract downloadable media from this link."

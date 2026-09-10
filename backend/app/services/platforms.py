@@ -43,11 +43,13 @@ _SUPPORTED_HOSTS: dict[Platform, tuple[str, ...]] = {
         "facebook.com",
         "www.facebook.com",
         "m.facebook.com",
+        "web.facebook.com",
         "fb.watch",
         "www.fb.watch",
+        "fb.me",
     ),
-    Platform.SNAPCHAT: ("snapchat.com", "www.snapchat.com", "story.snapchat.com"),
-    Platform.YOUTUBE: ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"),
+    Platform.SNAPCHAT: ("snapchat.com", "www.snapchat.com", "story.snapchat.com", "t.snapchat.com"),
+    Platform.YOUTUBE: ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com"),
 }
 
 
@@ -72,7 +74,12 @@ def detect_platform(url: str) -> PlatformInfo:
         raise ValueError("Please send a valid link with a website host.")
 
     for platform, hosts in _SUPPORTED_HOSTS.items():
-        if _matches(hostname, hosts):
+        matched = (
+            hostname == "pin.it" or hostname.startswith("pinterest.")
+            if platform == Platform.PINTEREST
+            else _matches(hostname, hosts)
+        )
+        if matched:
             return PlatformInfo(
                 platform=platform,
                 hostname=hostname,

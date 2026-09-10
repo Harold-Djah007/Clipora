@@ -109,13 +109,13 @@ class UniversalPlatformDetector {
       platform = SocialPlatform.instagram;
     } else if (_matches(host, const ['x.com', 'twitter.com', 'mobile.twitter.com'])) {
       platform = SocialPlatform.x;
-    } else if (_matches(host, const ['pinterest.com', 'pin.it'])) {
+    } else if (_matches(host, const ['pinterest.com', 'pin.it']) || host.startsWith('pinterest.')) {
       platform = SocialPlatform.pinterest;
-    } else if (_matches(host, const ['facebook.com', 'm.facebook.com', 'fb.watch'])) {
+    } else if (_matches(host, const ['facebook.com', 'm.facebook.com', 'fb.watch', 'fb.me'])) {
       platform = SocialPlatform.facebook;
-    } else if (_matches(host, const ['snapchat.com', 'story.snapchat.com'])) {
+    } else if (_matches(host, const ['snapchat.com', 'story.snapchat.com', 't.snapchat.com'])) {
       platform = SocialPlatform.snapchat;
-    } else if (_matches(host, const ['youtube.com', 'm.youtube.com', 'youtu.be'])) {
+    } else if (_matches(host, const ['youtube.com', 'm.youtube.com', 'youtu.be', 'youtube-nocookie.com'])) {
       platform = SocialPlatform.youtube;
     }
 

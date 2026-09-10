@@ -5,11 +5,12 @@ void main() {
   test('detects supported social platforms', () {
     final cases = <String, SocialPlatform>{
       'https://www.threads.com/@user/post/abc': SocialPlatform.threads,
+      'https://www.threads.com/share/short123': SocialPlatform.threads,
       'https://vm.tiktok.com/ZMh/': SocialPlatform.tiktok,
       'https://www.instagram.com/reel/abc/': SocialPlatform.instagram,
       'https://x.com/user/status/123': SocialPlatform.x,
       'https://pin.it/abc': SocialPlatform.pinterest,
-      'https://fb.watch/abc': SocialPlatform.facebook,
+      'https://fb.me/abc': SocialPlatform.facebook,
       'https://story.snapchat.com/p/example': SocialPlatform.snapchat,
       'https://youtu.be/abc': SocialPlatform.youtube,
     };

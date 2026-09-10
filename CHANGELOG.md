@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6+50 Queue more links and harden every saver
+- Instagram, X, YouTube, Pinterest, Facebook, and Snapchat now use the same yt-dlp retry and file-tunnel fallback as TikTok.
+- Threads public pages expand share and `/t/` links, keep mixed photo/video carousels, pick the highest CDN variant, and ignore poster-only video pages.
+- Threads media is fetched on the resolver and tunneled through `/api/files` so the phone is not blocked by Instagram CDN 403s.
+- New shares and pastes queue while a save is already running instead of being ignored.
+
 ## 2.0.6+49 Debug APK compile fix
 - Replaced the Kotlin `Notification.Builder.priority` field assignment that failed `flutter build apk` with `setPriority()`.
 

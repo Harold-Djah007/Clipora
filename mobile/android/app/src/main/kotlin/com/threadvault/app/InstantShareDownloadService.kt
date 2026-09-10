@@ -43,7 +43,7 @@ class InstantShareDownloadService : Service() {
         val urls = intent?.getStringArrayListExtra(EXTRA_URLS)
             ?: intent?.getStringExtra(EXTRA_URL)?.let { arrayListOf(it) }
             ?: arrayListOf()
-        val cleanUrls = urls.mapNotNull { extractFirstUrl(it) }.distinct().take(20)
+        val cleanUrls = urls.flatMap { extractUrls(it) }.distinct().take(20)
         if (cleanUrls.isEmpty()) {
             stopSelf(startId)
             return START_NOT_STICKY
@@ -52,7 +52,7 @@ class InstantShareDownloadService : Service() {
         activeJobs.incrementAndGet()
         startForeground(NOTIFICATION_ID, progressNotification("Queued ${cleanUrls.size} Clipora link${if (cleanUrls.size == 1) "" else "s"}…"))
         Thread { runSharedDownload(cleanUrls, startId) }.start()
-        return START_NOT_STICKY
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
@@ -352,12 +352,12 @@ class InstantShareDownloadService : Service() {
             CliporaNotifications.ensureResultChannel(context)
         }
 
-        private fun extractFirstUrl(raw: String): String? {
+        private fun extractUrls(raw: String): List<String> {
             return Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
-                .find(raw)
-                ?.value
-                ?.trim()
-                ?.trimEnd(',', '.', ';', ')')
+                .findAll(raw)
+                .map { it.value.trim().trimEnd(',', '.', ';', ')') }
+                .filter { it.isNotBlank() }
+                .toList()
         }
 
         private fun normalizeBaseUrl(raw: String?): String {

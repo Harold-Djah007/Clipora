@@ -340,3 +340,120 @@ def test_tiktok_download_fallback_when_extract_raises(monkeypatch):
 
     assert post.media[0].url == "/api/files/fallback"
     assert post.platform == "tiktok"
+
+
+def test_pin_it_share_link_stays_on_pinterest(monkeypatch):
+    provider = UniversalProvider()
+    canonical = "https://www.pinterest.com/pin/123456789/"
+
+    class Response:
+        def __init__(self, url, location=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "pin.it" in url:
+                return Response(url, location=canonical)
+            return Response(url)
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_share_url("https://pin.it/abc123") == canonical
+
+
+def test_youtube_tries_multiple_player_clients():
+    from app.services.platforms import Platform
+
+    provider = UniversalProvider()
+    attempts = provider._extract_attempts(
+        "https://www.youtube.com/shorts/abc",
+        "https://www.youtube.com/shorts/abc",
+        Platform.YOUTUBE,
+        False,
+    )
+    clients = [opts.get("extractor_args", {}).get("youtube", {}).get("player_client") for _, opts in attempts]
+    assert ["mweb", "tv"] in clients
+    assert ["android", "ios"] in clients
+
+
+def test_instagram_download_fallback_when_extract_raises(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(RuntimeError("")))
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/ig", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/ABC123/"))
+
+    assert post.media[0].url == "/api/files/ig"
+    assert post.platform == "instagram"
+
+
+def test_resolve_threads_tunnels_cdn_through_files(monkeypatch):
+    from app.services.threads_provider import ResolvedMedia, ResolvedPost
+
+    provider = UniversalProvider()
+    resolved = ResolvedPost(
+        post_id="ABC",
+        author="alice",
+        caption="hi",
+        media=[ResolvedMedia("video", "https://scontent.cdninstagram.com/v/t1/real.mp4", 720, 1280)],
+    )
+
+    async def fake_resolve(url):
+        return resolved
+
+    monkeypatch.setattr("app.services.universal_provider.threads_provider.resolve", fake_resolve)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type=media_type,
+            url="/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mime_type="video/mp4",
+            width=width,
+            height=height,
+        ),
+    )
+
+    post = asyncio.run(provider._resolve_threads("https://www.threads.com/@alice/post/ABC"))
+
+    assert post.platform == "threads"
+    assert post.media[0].url == "/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert post.media[0].media_type == "video"
+
+
+def test_resolve_threads_falls_back_to_direct_cdn_when_tunnel_fails(monkeypatch):
+    from app.services.threads_provider import ResolvedMedia, ResolvedPost
+
+    provider = UniversalProvider()
+    resolved = ResolvedPost(
+        post_id="ABC",
+        author="alice",
+        caption=None,
+        media=[ResolvedMedia("image", "https://scontent.cdninstagram.com/v/t51/photo.jpg", 1440, 1440)],
+    )
+
+    async def fake_resolve(url):
+        return resolved
+
+    monkeypatch.setattr("app.services.universal_provider.threads_provider.resolve", fake_resolve)
+    monkeypatch.setattr(provider, "_cache_http_media", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("403")))
+
+    post = asyncio.run(provider._resolve_threads("https://www.threads.com/@alice/post/ABC"))
+
+    assert post.media[0].url == "https://scontent.cdninstagram.com/v/t51/photo.jpg"

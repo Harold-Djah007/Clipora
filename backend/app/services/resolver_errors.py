@@ -23,6 +23,19 @@ _TIKTOK_RETRY = (
     "Open the post in TikTok, tap Share, and send it to Clipora again."
 )
 
+_PLATFORM_RETRY = (
+    ("threads", "Threads did not return a public photo or video for this link. Open the post, tap Share, and send it to Clipora again."),
+    ("instagram", "Instagram did not return a public photo, reel, or carousel for this link. Open the post, tap Share, and send it to Clipora again."),
+    ("facebook", "Facebook did not return a public video or photo for this link. Open the post, tap Share, and send it to Clipora again."),
+    ("tiktok", _TIKTOK_RETRY),
+    ("youtube", "YouTube did not return a downloadable file for this link. Public videos and Shorts work; private or age-gated videos do not."),
+    ("pinterest", "Pinterest did not return a public pin image or video for this link. Open the pin, tap Share, and send it to Clipora again."),
+    ("snapchat", "Snapchat did not return a public story or spotlight file for this link. Open the share link and send it to Clipora again."),
+    ("twitter", "X/Twitter did not return a public video or image for this link. Open the post, tap Share, and send it to Clipora again."),
+    (" x/", "X/Twitter did not return a public video or image for this link. Open the post, tap Share, and send it to Clipora again."),
+    ("this x link", "X/Twitter did not return a public video or image for this link. Open the post, tap Share, and send it to Clipora again."),
+)
+
 
 def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
     """Return a concise, display-safe resolver failure for API clients."""
@@ -44,14 +57,17 @@ def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
         return _TIKTOK_RETRY
     if "unsupported url" in lowered and "tiktok" in lowered:
         return "TikTok redirected this share link away from its video. Retry with the full TikTok video link or use a hosted resolver."
-    if "tiktok" in lowered and (
+    extract_failed = (
         not text
         or "could not extract" in lowered
         or "no downloadable" in lowered
         or "returned no downloadable" in lowered
-    ):
-        return _TIKTOK_RETRY
-    if "sign in" in lowered or "login" in lowered or "private" in lowered:
+    )
+    if extract_failed:
+        for token, message in _PLATFORM_RETRY:
+            if token in lowered:
+                return message
+    if "sign in" in lowered or "login" in lowered or "private" in lowered or "age-restrict" in lowered:
         return "This post is private or requires an account login. Clipora resolves public/shareable links only."
     if "ffmpeg" in lowered:
         return "The resolver needs FFmpeg to combine this video's audio and picture. Install FFmpeg on the resolver and retry."

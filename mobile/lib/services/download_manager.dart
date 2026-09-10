@@ -188,52 +188,7 @@ class DownloadManager {
   }
 
   bool _isSafePostMediaUrl(String raw, String sourceUrl) {
-    final uri = Uri.tryParse(raw);
-    if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) return false;
-    final lower = raw.toLowerCase();
-    final host = uri.host.toLowerCase();
-
-    if (_looksLikePageAsset(host, lower)) return false;
-    if (_looksLikeAudio(lower)) return false;
-    if (lower.contains('.m3u8') || lower.contains('m3u8')) return false;
-    if (uri.scheme == 'http' && !ResolverUrl.isPrivateHost(host)) return false;
-
-    if (_isThreadsSource(sourceUrl)) {
-      return _isStrictThreadsMediaUrl(host, lower);
-    }
-
-    // Universal links come from the backend resolver, then the downloaded bytes are
-    // verified before publishing. HTTP is limited to the local/LAN resolver used for
-    // HLS file fallback. Threads still uses the old Instagram/fbcdn guard.
-    return true;
-  }
-
-  bool _isThreadsSource(String raw) {
-    final uri = Uri.tryParse(raw);
-    final host = uri?.host.toLowerCase() ?? '';
-    return host.contains('threads.com') || host.contains('threads.net');
-  }
-
-  bool _isStrictThreadsMediaUrl(String host, String lower) {
-    final goodHost = host.contains('cdninstagram.com') || host.contains('fbcdn.net');
-    if (!goodHost) return false;
-    if (lower.contains('.mp4') || lower.contains('mime_type=video')) return true;
-    if (lower.contains('.jpg') || lower.contains('.jpeg') || lower.contains('.png') || lower.contains('.webp') || lower.contains('.gif')) return true;
-    return false;
-  }
-
-  bool _looksLikePageAsset(String host, String lower) {
-    if (host == 'static.cdninstagram.com') return true;
-    if (lower.contains('/rsrc.php/') || lower.contains('/static/')) return true;
-    if (lower.contains('sprite') || lower.contains('favicon')) return true;
-    if (lower.endsWith('.css') || lower.endsWith('.js') || lower.endsWith('.svg')) return true;
-    return false;
-  }
-
-  bool _looksLikeAudio(String lower) {
-    if (lower.contains('mime_type=audio') || lower.contains('/audio/')) return true;
-    if (lower.endsWith('.m4a') || lower.endsWith('.mp3') || lower.endsWith('.aac') || lower.endsWith('.ogg') || lower.endsWith('.wav')) return true;
-    return false;
+    return isSafePostMediaUrl(raw, sourceUrl);
   }
 
   Future<_DetectedMediaKind?> _detectMediaKind(File file) async {
@@ -335,6 +290,70 @@ class DownloadManager {
     if (value.length > 120) value = value.substring(0, 120);
     return value.isEmpty ? '${post.author}_${post.postId}_$index' : value;
   }
+}
+
+bool isSafePostMediaUrl(String raw, String sourceUrl) {
+  final uri = Uri.tryParse(raw);
+  if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) return false;
+  final lower = raw.toLowerCase();
+  final host = uri.host.toLowerCase();
+
+  if (_looksLikePageAsset(host, lower)) return false;
+  if (_looksLikeAudioUrl(lower)) return false;
+  if (lower.contains('.m3u8') || lower.contains('m3u8')) return false;
+  if (uri.scheme == 'http' && !ResolverUrl.isPrivateHost(host)) return false;
+
+  if (_isThreadsSource(sourceUrl)) {
+    if (_isResolverTunneledUrl(uri)) return true;
+    return _isStrictThreadsMediaUrl(host, lower);
+  }
+
+  return true;
+}
+
+bool _isThreadsSource(String raw) {
+  final uri = Uri.tryParse(raw);
+  final host = uri?.host.toLowerCase() ?? '';
+  return host.contains('threads.com') || host.contains('threads.net');
+}
+
+bool _isResolverTunneledUrl(Uri uri) {
+  final path = uri.path.toLowerCase();
+  if (!path.contains('/api/files/')) return false;
+  if (uri.scheme == 'https') return true;
+  return ResolverUrl.isPrivateHost(uri.host.toLowerCase());
+}
+
+bool _isStrictThreadsMediaUrl(String host, String lower) {
+  final goodHost = host.contains('cdninstagram.com') || host.contains('fbcdn.net');
+  if (!goodHost) return false;
+  if (lower.contains('.mp4') || lower.contains('mime_type=video') || lower.contains('mime=video')) return true;
+  if (lower.contains('.jpg') ||
+      lower.contains('.jpeg') ||
+      lower.contains('.png') ||
+      lower.contains('.webp') ||
+      lower.contains('.gif') ||
+      lower.contains('stp=dst-jpg') ||
+      lower.contains('mime_type=image')) {
+    return true;
+  }
+  return false;
+}
+
+bool _looksLikePageAsset(String host, String lower) {
+  if (host == 'static.cdninstagram.com') return true;
+  if (lower.contains('/rsrc.php/') || lower.contains('/static/')) return true;
+  if (lower.contains('sprite') || lower.contains('favicon')) return true;
+  if (lower.endsWith('.css') || lower.endsWith('.js') || lower.endsWith('.svg')) return true;
+  return false;
+}
+
+bool _looksLikeAudioUrl(String lower) {
+  if (lower.contains('mime_type=audio') || lower.contains('/audio/')) return true;
+  if (lower.endsWith('.m4a') || lower.endsWith('.mp3') || lower.endsWith('.aac') || lower.endsWith('.ogg') || lower.endsWith('.wav')) {
+    return true;
+  }
+  return false;
 }
 
 enum _DetectedMediaKind { video, image }

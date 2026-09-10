@@ -77,6 +77,7 @@ class UniversalProvider:
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
+        "geo_bypass": True,
         "http_headers": {
             "Accept-Language": "en-US,en;q=0.9",
         },
@@ -100,6 +101,33 @@ class UniversalProvider:
 
     async def _resolve_threads(self, url: str) -> UniversalPost:
         post = await threads_provider.resolve(url)
+        loop = asyncio.get_running_loop()
+        media: list[UniversalMedia] = []
+        for index, item in enumerate(post.media[: self._MAX_PLAYLIST_MEDIA], start=1):
+            direct = UniversalMedia(
+                media_type=item.media_type,
+                url=item.url,
+                mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
+                width=item.width,
+                height=item.height,
+                quality=self._quality_label(item.width, item.height),
+            )
+            try:
+                cached = await loop.run_in_executor(
+                    None,
+                    self._cache_http_media,
+                    item.url,
+                    item.media_type,
+                    url,
+                    index,
+                    item.width,
+                    item.height,
+                )
+                media.append(cached)
+            except Exception:
+                media.append(direct)
+        if not media:
+            raise ValueError(self._no_media_message(Platform.THREADS))
         return UniversalPost(
             post_id=post.post_id,
             author=post.author,
@@ -107,42 +135,36 @@ class UniversalProvider:
             source_url=url,
             title=None,
             caption=post.caption,
-            media=[
-                UniversalMedia(
-                    media_type=item.media_type,
-                    url=item.url,
-                    mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
-                    width=item.width,
-                    height=item.height,
-                    quality=self._quality_label(item.width, item.height),
-                )
-                for item in post.media
-            ],
+            media=media,
         )
 
     async def _resolve_with_ytdlp(self, url: str) -> UniversalPost:
         platform_info = ensure_supported_platform(url)
-        source_url = self._expand_tiktok_short_url(url) if platform_info.platform == Platform.TIKTOK else url
+        source_url = self._prepare_source_url(url, platform_info.platform)
         loop = asyncio.get_running_loop()
         try:
             info = await loop.run_in_executor(None, self._extract_info, source_url)
         except Exception as extract_error:
-            if platform_info.platform == Platform.TIKTOK:
-                stub = {"id": self._post_id_from_url(source_url) or "clipora", "uploader": "tiktok"}
-                try:
-                    media = await loop.run_in_executor(None, self._download_to_cache, source_url, stub, 1)
-                except Exception:
-                    media = []
-                if media:
-                    return UniversalPost(
-                        post_id=safe_filename_part(str(stub["id"])),
-                        author="tiktok",
-                        platform=platform_info.platform.value,
-                        source_url=url,
-                        title=None,
-                        caption=None,
-                        media=media,
-                    )
+            try:
+                media = await loop.run_in_executor(
+                    None,
+                    self._download_to_cache,
+                    source_url,
+                    {"id": self._post_id_from_url(source_url) or "clipora", "uploader": platform_info.platform.value},
+                    1,
+                )
+            except Exception:
+                media = []
+            if media:
+                return UniversalPost(
+                    post_id=safe_filename_part(str(self._post_id_from_url(source_url) or "clipora")),
+                    author=platform_info.platform.value,
+                    platform=platform_info.platform.value,
+                    source_url=url,
+                    title=None,
+                    caption=None,
+                    media=media,
+                )
             raise extract_error
 
         entries = self._entry_infos(info)
@@ -170,7 +192,7 @@ class UniversalProvider:
             media.extend(entry_media)
 
         media = self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA]
-        if not media and platform_info.platform == Platform.TIKTOK:
+        if not media:
             try:
                 media = await loop.run_in_executor(
                     None, self._download_to_cache, self._entry_url(info, source_url), info, 1
@@ -178,12 +200,7 @@ class UniversalProvider:
             except Exception:
                 media = []
         if not media:
-            if platform_info.platform == Platform.TIKTOK:
-                raise ValueError(
-                    "TikTok did not return a public video or photo file for this link. "
-                    "Open the post in TikTok, tap Share, and send it to Clipora again."
-                )
-            raise ValueError("No downloadable MP4/image media found for this link.")
+            raise ValueError(self._no_media_message(platform_info.platform))
 
         post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora"))
         author = safe_filename_part(str(info.get("uploader") or info.get("channel") or platform_info.platform.value))
@@ -203,22 +220,8 @@ class UniversalProvider:
     def _extract_info(self, url: str) -> dict[str, Any]:
         platform = detect_platform(url).platform
         allow_playlist = platform not in {Platform.THREADS, Platform.YOUTUBE}
-        extractor_url = self._expand_tiktok_short_url(url) if platform == Platform.TIKTOK else url
-        attempts: list[tuple[str, dict[str, Any]]] = []
-        if platform == Platform.TIKTOK:
-            urls_to_try: list[str] = []
-            for candidate in (extractor_url, url):
-                if candidate not in urls_to_try:
-                    urls_to_try.append(candidate)
-            for attempt_url in urls_to_try:
-                for impersonate in ("chrome", "chrome120"):
-                    attempt_opts = self._ydl_opts_for(attempt_url, allow_playlist=allow_playlist)
-                    attempt_opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
-                    attempt_opts["impersonate"] = impersonate
-                    attempts.append((attempt_url, attempt_opts))
-            attempts.append((extractor_url, self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)))
-        else:
-            attempts.append((extractor_url, self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)))
+        extractor_url = self._prepare_source_url(url, platform)
+        attempts = self._extract_attempts(extractor_url, url, platform, allow_playlist)
 
         last_error: Exception | None = None
         for attempt_url, attempt_opts in attempts:
@@ -249,6 +252,83 @@ class UniversalProvider:
         raise ValueError(
             f"yt-dlp could not extract media from this {platform.value} link. {detail}"
         ) from last_error
+
+    def _extract_attempts(
+        self, extractor_url: str, original_url: str, platform: Platform, allow_playlist: bool
+    ) -> list[tuple[str, dict[str, Any]]]:
+        attempts: list[tuple[str, dict[str, Any]]] = []
+        urls_to_try: list[str] = []
+        for candidate in (extractor_url, original_url):
+            if candidate not in urls_to_try:
+                urls_to_try.append(candidate)
+
+        if platform == Platform.YOUTUBE:
+            for clients in (["mweb", "tv"], ["android", "ios"], ["web"]):
+                opts = self._ydl_opts_for(extractor_url, allow_playlist=False)
+                opts["extractor_args"] = {"youtube": {"player_client": clients}}
+                attempts.append((extractor_url, opts))
+            return attempts
+
+        impersonates: tuple[str, ...] = ()
+        if platform == Platform.TIKTOK:
+            impersonates = ("chrome", "chrome120")
+        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT, Platform.X, Platform.PINTEREST}:
+            impersonates = ("chrome", "chrome120")
+
+        for attempt_url in urls_to_try:
+            for impersonate in impersonates:
+                attempt_opts = self._ydl_opts_for(attempt_url, allow_playlist=allow_playlist)
+                headers = dict(attempt_opts.get("http_headers") or {})
+                headers["Accept-Language"] = "en-US,en;q=0.9"
+                attempt_opts["http_headers"] = headers
+                attempt_opts["impersonate"] = impersonate
+                attempts.append((attempt_url, attempt_opts))
+            attempts.append((attempt_url, self._ydl_opts_for(attempt_url, allow_playlist=allow_playlist)))
+        return attempts or [(extractor_url, self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist))]
+
+    def _prepare_source_url(self, url: str, platform: Platform) -> str:
+        if platform == Platform.THREADS:
+            return url
+        if platform == Platform.TIKTOK:
+            return self._expand_tiktok_short_url(url)
+        return self._expand_share_url(url)
+
+    @staticmethod
+    def _no_media_message(platform: Platform) -> str:
+        return {
+            Platform.THREADS: (
+                "No downloadable media found. Threads did not return a public photo or video for this link. "
+                "Open the post, tap Share, and send it to Clipora again."
+            ),
+            Platform.TIKTOK: (
+                "TikTok did not return a public video or photo file for this link. "
+                "Open the post in TikTok, tap Share, and send it to Clipora again."
+            ),
+            Platform.INSTAGRAM: (
+                "Instagram did not return a public photo, reel, or carousel for this link. "
+                "Open the post, tap Share, and send it to Clipora again."
+            ),
+            Platform.FACEBOOK: (
+                "Facebook did not return a public video or photo for this link. "
+                "Open the post, tap Share, and send it to Clipora again."
+            ),
+            Platform.X: (
+                "X/Twitter did not return a public video or image for this link. "
+                "Open the post, tap Share, and send it to Clipora again."
+            ),
+            Platform.YOUTUBE: (
+                "YouTube did not return a downloadable file for this link. "
+                "Public videos and Shorts work; private or age-gated videos do not."
+            ),
+            Platform.PINTEREST: (
+                "Pinterest did not return a public pin image or video for this link. "
+                "Open the pin, tap Share, and send it to Clipora again."
+            ),
+            Platform.SNAPCHAT: (
+                "Snapchat did not return a public story or spotlight file for this link. "
+                "Open the share link and send it to Clipora again."
+            ),
+        }.get(platform, "No downloadable MP4/image media found for this link.")
 
     @classmethod
     def _is_tiktok_short_url(cls, url: str) -> bool:
@@ -350,6 +430,89 @@ class UniversalProvider:
                 continue
         return url
 
+    _SHORT_SHARE_HOSTS = {
+        "pin.it",
+        "www.pin.it",
+        "fb.watch",
+        "www.fb.watch",
+        "fb.me",
+        "l.instagram.com",
+        "lm.facebook.com",
+        "t.snapchat.com",
+        "instagr.am",
+        "www.instagr.am",
+    }
+
+    @classmethod
+    def _expand_share_url(cls, url: str) -> str:
+        """Follow public share/short links onto the same platform, cobalt-style."""
+
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path or ""
+        instagram_share = host.endswith("instagram.com") and path.startswith("/share")
+        if host not in cls._SHORT_SHARE_HOSTS and not instagram_share:
+            return url
+        try:
+            family = cls._host_family(detect_platform(url).platform)
+        except Exception:
+            return url
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        current = url
+        best = url
+        seen: set[str] = set()
+        try:
+            with httpx.Client(follow_redirects=False, timeout=10.0, headers=headers) as client:
+                for _ in range(8):
+                    if current in seen:
+                        break
+                    seen.add(current)
+                    response = client.get(current)
+                    location = str(response.headers.get("location") or "").strip()
+                    for blob in (str(response.url), location):
+                        if not blob:
+                            continue
+                        candidate = urljoin(current, blob)
+                        if cls._host_in_family(candidate, family):
+                            best = candidate
+                    if not location:
+                        break
+                    nxt = urljoin(current, location)
+                    if not cls._host_in_family(nxt, family):
+                        break
+                    current = nxt
+                    best = current
+        except (httpx.HTTPError, ValueError):
+            return best
+        return best
+
+    @staticmethod
+    def _host_family(platform: Platform) -> tuple[str, ...]:
+        return {
+            Platform.PINTEREST: ("pinterest.com", "pin.it"),
+            Platform.FACEBOOK: ("facebook.com", "fb.watch", "fb.me"),
+            Platform.INSTAGRAM: ("instagram.com", "instagr.am"),
+            Platform.SNAPCHAT: ("snapchat.com",),
+            Platform.YOUTUBE: ("youtube.com", "youtu.be"),
+            Platform.X: ("x.com", "twitter.com"),
+            Platform.TIKTOK: ("tiktok.com",),
+            Platform.THREADS: ("threads.com", "threads.net"),
+        }.get(platform, ())
+
+    @staticmethod
+    def _host_in_family(url: str, family: tuple[str, ...]) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        if not host or not family:
+            return False
+        return any(host == domain or host.endswith("." + domain) for domain in family)
+
     def _extract_info_with_opts(self, url: str, opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
             info = ydl.extract_info(url, download=False)
@@ -373,7 +536,7 @@ class UniversalProvider:
             # helps photo slideshows that have no playable video format.
             headers.pop("User-Agent", None)
             opts["extractor_args"] = {"tiktok": {"webpage_download": ["True"]}}
-        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT}:
+        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT, Platform.PINTEREST}:
             headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
 
         return opts
@@ -618,7 +781,14 @@ class UniversalProvider:
             "noprogress": True,
             "socket_timeout": 45,
         }
-        if detect_platform(url).platform == Platform.TIKTOK:
+        if detect_platform(url).platform in {
+            Platform.TIKTOK,
+            Platform.INSTAGRAM,
+            Platform.FACEBOOK,
+            Platform.SNAPCHAT,
+            Platform.PINTEREST,
+            Platform.X,
+        }:
             opts["impersonate"] = "chrome"
             opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
         try:
@@ -668,6 +838,67 @@ class UniversalProvider:
                 quality=str(downloaded_info.get("format_note") or self._quality_label(width, height) or f"downloaded-{index}"),
             )
         ]
+
+    def _cache_http_media(
+        self,
+        url: str,
+        media_type: str,
+        source_url: str,
+        index: int = 1,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> UniversalMedia:
+        """Fetch a public CDN file on the resolver so the phone can save `/api/files`."""
+
+        parsed_source = urlparse(source_url)
+        referer = source_url if source_url.startswith("http") else "https://www.threads.com/"
+        if parsed_source.scheme != "https":
+            referer = "https://www.threads.com/"
+        cache_dir = Path(tempfile.gettempdir()) / "clipora-media"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        suffix = ".mp4" if media_type == "video" else self._image_suffix(url)
+        dest = cache_dir / f"{token}{suffix}"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "video/mp4,image/avif,image/webp,image/*,*/*;q=0.8" if media_type != "video" else "video/mp4,video/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": referer,
+        }
+        with httpx.Client(follow_redirects=True, timeout=45.0, headers=headers) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            content_type = str(response.headers.get("content-type") or "").lower()
+            if "text/html" in content_type or "application/json" in content_type:
+                raise ValueError("Threads CDN returned a page instead of media")
+            payload = response.content or b""
+            if len(payload) < 256:
+                raise ValueError("Threads CDN returned an empty media file")
+            dest.write_bytes(payload)
+        media_file_cache.put(dest, token)
+        return UniversalMedia(
+            media_type=media_type,
+            url=f"/api/files/{token}",
+            mime_type="video/mp4" if media_type == "video" else self._image_mime_type(url),
+            width=width,
+            height=height,
+            filesize=dest.stat().st_size,
+            quality=self._quality_label(width, height) or f"downloaded-{index}",
+        )
+
+    @staticmethod
+    def _image_suffix(url: str) -> str:
+        lower = url.lower()
+        if ".png" in lower:
+            return ".png"
+        if ".webp" in lower:
+            return ".webp"
+        if ".gif" in lower:
+            return ".gif"
+        return ".jpg"
 
     @staticmethod
     def _find_downloaded_file(cache_dir: Path, token: str) -> Optional[Path]:

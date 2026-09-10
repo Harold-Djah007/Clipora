@@ -118,7 +118,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
   void _scheduleInstantDownload() {
     autoTimer?.cancel();
     final urls = _extractUrls(controller.text);
-    if (urls.isEmpty || context.read<AppState>().busy) return;
+    if (urls.isEmpty) return;
     autoTimer = Timer(const Duration(milliseconds: 650), () {
       if (mounted) unawaited(_downloadNow());
     });
@@ -137,11 +137,16 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     lastAutoFingerprint = fingerprint;
     autoTimer?.cancel();
 
+    final app = context.read<AppState>();
+    final queuedBehindWork = app.hasWork;
     HapticFeedback.mediumImpact();
     setState(() {
       stage = _InstantStage.saving;
       errorText = null;
     });
+    if (queuedBehindWork) {
+      _snack('Queued ${urls.length} link${urls.length == 1 ? '' : 's'}. Clipora will save them after the current download.');
+    }
 
     await PlatformServices.startDownloadService(
       message: 'Clipora accepted the link. You can keep watching; saving continues in the background.',
@@ -154,30 +159,32 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     }
 
     try {
-      final ok = await context.read<AppState>().resolveAndDownload(urls);
+      final ok = await app.resolveAndDownload(urls);
       if (!mounted) return;
+      final stillWorking = context.read<AppState>().hasWork;
       if (ok) {
         setState(() {
           if (controller.text == submitted) {
             controller.clear();
             clipboardUrl = null;
           }
-          stage = _InstantStage.done;
+          stage = stillWorking ? _InstantStage.saving : _InstantStage.done;
           errorText = null;
-          lastAutoFingerprint = null;
+          if (!stillWorking) lastAutoFingerprint = null;
         });
-        _flashDone();
+        if (!stillWorking) _flashDone();
       } else {
         setState(() {
-          stage = _InstantStage.error;
-          errorText = context.read<AppState>().status ?? 'Clipora could not save media from this link.';
+          stage = stillWorking ? _InstantStage.saving : _InstantStage.error;
+          errorText = stillWorking ? null : (context.read<AppState>().status ?? 'Clipora could not save media from this link.');
         });
       }
     } catch (error) {
       if (!mounted) return;
+      final stillWorking = context.read<AppState>().hasWork;
       setState(() {
-        stage = _InstantStage.error;
-        errorText = _cleanError(error);
+        stage = stillWorking ? _InstantStage.saving : _InstantStage.error;
+        errorText = stillWorking ? null : _cleanError(error);
       });
     }
   }
@@ -209,7 +216,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     final matches = UniversalPlatformDetector.detectAll(urls);
     final hasBackend = app.universalResolver.hasConfiguredBackend;
     final recent = app.history.take(5).toList();
-    final busy = app.busy || stage == _InstantStage.saving;
+    final busy = app.busy || app.hasWork || stage == _InstantStage.saving;
 
     return CliporaPage(
       padding: EdgeInsets.zero,
@@ -244,7 +251,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
                     stage = _InstantStage.idle;
                   });
                 },
-                onDownload: busy ? null : () => _downloadNow(force: true),
+                onDownload: urls.isEmpty ? null : () => _downloadNow(force: true),
               ),
               const SizedBox(height: 14),
               _StatusPanel(stage: stage, status: app.status, busy: busy, error: errorText),
@@ -343,7 +350,7 @@ class _ShareFirstPanel extends StatelessWidget {
             hintText: 'Paste or share TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, or Threads…',
             prefixIcon: const Icon(Icons.link_rounded),
             suffixIcon: controller.text.trim().isEmpty
-                ? IconButton(tooltip: 'Paste and download', onPressed: busy ? null : onPaste, icon: const Icon(Icons.content_paste_go_rounded))
+                ? IconButton(tooltip: 'Paste and download', onPressed: onPaste, icon: const Icon(Icons.content_paste_go_rounded))
                 : IconButton(tooltip: 'Clear', onPressed: busy ? null : onClear, icon: const Icon(Icons.close_rounded)),
           ),
         ),
@@ -370,7 +377,7 @@ class _ShareFirstPanel extends StatelessWidget {
             onPressed: onDownload,
             icon: Icon(busy ? Icons.downloading_rounded : Icons.bolt_rounded),
             label: Text(busy
-                ? 'Downloading in background…'
+                ? (urlCount > 0 ? 'Queue $urlCount more' : 'Saving in background…')
                 : urlCount > 1
                     ? 'Download $urlCount links now'
                     : 'Download now'),
@@ -378,12 +385,12 @@ class _ShareFirstPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Fastest flow: tap Share in the social app → Clipora → you are sent back. Clipora posts a notification for both successful saves and failures while you are out of the app. Allow notifications when Android asks.',
+          'Share or paste more links while a save is running — Clipora queues them. Fastest flow: TikTok/Instagram/Threads → Share → Clipora. Allow notifications when Android asks.',
           style: TextStyle(color: Colors.white.withOpacity(.52), height: 1.35, fontSize: 12.3, fontWeight: FontWeight.w600),
         ),
         if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
           const SizedBox(height: 10),
-          TextButton.icon(onPressed: busy ? null : onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Paste clipboard and download')),
+          TextButton.icon(onPressed: onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Paste clipboard and download')),
         ],
       ]),
     );
