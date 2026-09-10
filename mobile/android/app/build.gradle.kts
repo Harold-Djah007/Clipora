@@ -50,7 +50,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        manifestPlaceholders["cliporaResolverUrl"] = cliporaResolverUrl
+        resValue("string", "clipora_resolver_url", cliporaResolverUrl)
     }
 
     buildTypes {
