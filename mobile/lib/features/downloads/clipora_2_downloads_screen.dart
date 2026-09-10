@@ -85,7 +85,9 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       errorText = null;
       stage = _InstantStage.idle;
     });
-    if (autoStart) _scheduleInstantDownload();
+    if (autoStart) {
+      unawaited(_downloadNow(force: true, returnAfterHandoff: true));
+    }
   }
 
   Future<void> _readClipboard({required bool autoStart}) async {
@@ -122,7 +124,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     });
   }
 
-  Future<void> _downloadNow({bool force = false}) async {
+  Future<void> _downloadNow({bool force = false, bool returnAfterHandoff = false}) async {
     final submitted = controller.text;
     final urls = _extractUrls(submitted);
     if (urls.isEmpty) {
@@ -140,6 +142,16 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       stage = _InstantStage.saving;
       errorText = null;
     });
+
+    await PlatformServices.startDownloadService(
+      message: 'Clipora accepted the link. You can keep watching; saving continues in the background.',
+    );
+
+    if (returnAfterHandoff) {
+      Future<void>.delayed(const Duration(milliseconds: 240), () async {
+        await PlatformServices.returnToSourceApp();
+      });
+    }
 
     try {
       final ok = await context.read<AppState>().resolveAndDownload(
@@ -210,7 +222,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
             children: [
               _Header(hasBackend: hasBackend),
               const SizedBox(height: 18),
-              _PastePanel(
+              _ShareFirstPanel(
                 controller: controller,
                 urlCount: urls.length,
                 matches: matches,
@@ -265,7 +277,7 @@ class _Header extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Clipora Instant', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1)),
           SizedBox(height: 3),
-          Text('Paste. Resolver downloads. Done.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
+          Text('Share. Return. Saved.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
         ]),
       ),
       _ModeBadge(hasBackend: hasBackend),
@@ -273,8 +285,8 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _PastePanel extends StatelessWidget {
-  const _PastePanel({
+class _ShareFirstPanel extends StatelessWidget {
+  const _ShareFirstPanel({
     required this.controller,
     required this.urlCount,
     required this.matches,
@@ -305,18 +317,18 @@ class _PastePanel extends StatelessWidget {
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Just paste the link.', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, letterSpacing: -.9, height: 1.05)),
+              const Text('Share a link to Clipora.', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, letterSpacing: -.9, height: 1.05)),
               const SizedBox(height: 8),
               Text(
                 hasBackend
-                    ? 'Every platform uses the resolver engine. No phone web-player capture.'
-                    : 'Connect a hosted resolver once, then Clipora becomes paste-and-download for every platform.',
+                    ? 'Clipora accepts the share, starts the resolver, then returns you to the app you were watching in about a quarter second.'
+                    : 'Add a hosted resolver once. After that, sharing any supported link becomes one-tap automatic.',
                 style: const TextStyle(color: Colors.white60, height: 1.35, fontSize: 13.2),
               ),
             ]),
           ),
           const SizedBox(width: 14),
-          _MetricTile(value: urlCount == 0 ? 'AUTO' : '$urlCount', label: urlCount == 1 ? 'link' : 'links'),
+          _MetricTile(value: urlCount == 0 ? '0.2s' : '$urlCount', label: urlCount == 1 ? 'link' : 'links'),
         ]),
         const SizedBox(height: 18),
         TextField(
@@ -327,7 +339,7 @@ class _PastePanel extends StatelessWidget {
           textInputAction: TextInputAction.newline,
           style: const TextStyle(fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w600),
           decoration: InputDecoration(
-            hintText: 'Paste TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, or Threads…',
+            hintText: 'Paste or share TikTok, Instagram, X, Pinterest, Facebook, Snapchat, YouTube, or Threads…',
             prefixIcon: const Icon(Icons.link_rounded),
             suffixIcon: controller.text.trim().isEmpty
                 ? IconButton(tooltip: 'Paste and download', onPressed: busy ? null : onPaste, icon: const Icon(Icons.content_paste_go_rounded))
@@ -343,7 +355,7 @@ class _PastePanel extends StatelessWidget {
                 .map((match) => CliporaPill(
                       icon: match.icon,
                       label: match.label,
-                      value: hasBackend ? 'resolver' : 'needs resolver',
+                      value: hasBackend ? 'auto' : 'needs resolver',
                       color: match.accent,
                     ))
                 .toList(growable: false),
@@ -357,11 +369,16 @@ class _PastePanel extends StatelessWidget {
             onPressed: onDownload,
             icon: Icon(busy ? Icons.downloading_rounded : Icons.bolt_rounded),
             label: Text(busy
-                ? 'Downloading now…'
+                ? 'Downloading in background…'
                 : urlCount > 1
                     ? 'Download $urlCount links now'
                     : 'Download now'),
           ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Fastest flow: tap Share in the social app → Clipora → you are sent back while the download notification continues.',
+          style: TextStyle(color: Colors.white.withOpacity(.52), height: 1.35, fontSize: 12.3, fontWeight: FontWeight.w650),
         ),
         if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
           const SizedBox(height: 10),
@@ -384,8 +401,8 @@ class _StatusPanel extends StatelessWidget {
     final failed = stage == _InstantStage.error || error != null;
     final done = stage == _InstantStage.done;
     final color = failed ? const Color(0xFFFCA5A5) : done ? const Color(0xFF86EFAC) : const Color(0xFF67E8F9);
-    final icon = failed ? Icons.error_outline_rounded : done ? Icons.check_circle_rounded : busy ? Icons.downloading_rounded : Icons.touch_app_rounded;
-    final message = error ?? status ?? 'Ready. Paste a link and Clipora starts automatically.';
+    final icon = failed ? Icons.error_outline_rounded : done ? Icons.check_circle_rounded : busy ? Icons.downloading_rounded : Icons.ios_share_rounded;
+    final message = error ?? status ?? 'Share a link to Clipora and it starts automatically.';
     return _GlassPanel(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -398,7 +415,7 @@ class _StatusPanel extends StatelessWidget {
           const SizedBox(height: 12),
           const ClipRRect(borderRadius: BorderRadius.all(Radius.circular(999)), child: LinearProgressIndicator(minHeight: 6)),
           const SizedBox(height: 8),
-          const Text('No page switching. Clipora is using the resolver engine and saving quietly.', style: TextStyle(color: Colors.white54, fontSize: 12.5)),
+          const Text('No screen watching needed. Clipora is resolving through the backend and saving quietly.', style: TextStyle(color: Colors.white54, fontSize: 12.5)),
         ],
       ]),
     );
@@ -414,9 +431,9 @@ class _RoutePanel extends StatelessWidget {
     return _GlassPanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       child: Row(children: [
-        const Expanded(child: _RouteStep(icon: Icons.travel_explore_rounded, title: 'Detect', body: 'auto')),
+        const Expanded(child: _RouteStep(icon: Icons.ios_share_rounded, title: 'Share', body: '0 taps')),
         const Icon(Icons.chevron_right_rounded, color: Colors.white24),
-        Expanded(child: _RouteStep(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.cloud_off_rounded, title: 'Resolve', body: hasBackend ? 'engine' : 'needed')),
+        Expanded(child: _RouteStep(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.cloud_off_rounded, title: 'Resolve', body: hasBackend ? 'server' : 'needed')),
         const Icon(Icons.chevron_right_rounded, color: Colors.white24),
         const Expanded(child: _RouteStep(icon: Icons.download_done_rounded, title: 'Save', body: 'gallery')),
       ]),
@@ -501,7 +518,7 @@ class _ModeBadge extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(hasBackend ? Icons.cloud_done_rounded : Icons.cloud_off_rounded, size: 14, color: const Color(0xFF8BE9E0)),
         const SizedBox(width: 6),
-        Text(hasBackend ? 'Resolver' : 'Connect', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
+        Text(hasBackend ? 'Auto' : 'Connect', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
       ]),
     );
   }
