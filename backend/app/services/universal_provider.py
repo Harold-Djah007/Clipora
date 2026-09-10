@@ -7,13 +7,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 
 from app.services.file_cache import media_file_cache
 from app.services.platforms import Platform, detect_platform, ensure_supported_platform, safe_filename_part
-from app.services.threads_provider import provider as threads_provider
+from app.services.threads_provider import ThreadsHtmlParser, provider as threads_provider
 
 try:  # yt-dlp is optional at import time so tests can still exercise validation paths.
     import yt_dlp  # type: ignore
@@ -66,8 +66,10 @@ class UniversalProvider:
         re.I,
     )
 
+    _IG_SHORTCODE = re.compile(r"/(?:p|reel|reels|tv)/([A-Za-z0-9_-]{5,})", re.I)
+    _X_STATUS_ID = re.compile(r"/(?:status|statuses)/(\d{5,30})", re.I)
     _ydl_opts: dict[str, Any] = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "format": "best[ext=mp4][protocol^=http]/best[ext=mp4]/best[protocol^=http]/best",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -142,80 +144,87 @@ class UniversalProvider:
         platform_info = ensure_supported_platform(url)
         source_url = self._prepare_source_url(url, platform_info.platform)
         loop = asyncio.get_running_loop()
+        extract_error: Exception | None = None
+        info: dict[str, Any] | None = None
         try:
             info = await loop.run_in_executor(None, self._extract_info, source_url)
-        except Exception as extract_error:
-            try:
-                media = await loop.run_in_executor(
-                    None,
-                    self._download_to_cache,
-                    source_url,
-                    {"id": self._post_id_from_url(source_url) or "clipora", "uploader": platform_info.platform.value},
-                    1,
+        except Exception as err:
+            extract_error = err
+
+        if info is not None:
+            media: list[UniversalMedia] = []
+            for index, entry in enumerate(self._entry_infos(info)[: self._MAX_PLAYLIST_MEDIA], start=1):
+                entry_url = self._entry_url(entry, source_url)
+                entry_media = self._extract_media_items(entry)
+                video_like = self._has_video_like_format(entry, self._formats(entry)) or any(
+                    item.media_type == "video" for item in entry_media
                 )
-            except Exception:
-                media = []
+                if video_like:
+                    try:
+                        cached = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
+                        if cached:
+                            entry_media = cached
+                    except Exception:
+                        if not entry_media:
+                            entry_media = self._image_fallback_from_info(entry)
+                if not entry_media:
+                    entry_media = self._image_fallback_from_info(entry)
+                media.extend(entry_media)
+
+            media = self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA]
+            if not media:
+                try:
+                    media = await loop.run_in_executor(
+                        None, self._download_to_cache, self._entry_url(info, source_url), info, 1
+                    )
+                except Exception:
+                    media = self._image_fallback_from_info(info)
             if media:
                 return UniversalPost(
-                    post_id=safe_filename_part(str(self._post_id_from_url(source_url) or "clipora")),
-                    author=platform_info.platform.value,
+                    post_id=safe_filename_part(
+                        str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora")
+                    ),
+                    author=safe_filename_part(
+                        str(info.get("uploader") or info.get("channel") or platform_info.platform.value)
+                    ),
                     platform=platform_info.platform.value,
                     source_url=url,
-                    title=None,
-                    caption=None,
+                    title=info.get("title") or info.get("fulltitle"),
+                    caption=info.get("description") or info.get("title"),
                     media=media,
                 )
-            raise extract_error
 
-        entries = self._entry_infos(info)
-
-        media: list[UniversalMedia] = []
-        for index, entry in enumerate(entries[: self._MAX_PLAYLIST_MEDIA], start=1):
-            entry_url = self._entry_url(entry, source_url)
-            entry_media = self._extract_media_items(entry)
-            video_like = self._has_video_like_format(entry, self._formats(entry)) or any(
-                item.media_type == "video" for item in entry_media
+        try:
+            media = await loop.run_in_executor(
+                None,
+                self._download_to_cache,
+                source_url,
+                {"id": self._post_id_from_url(source_url) or "clipora", "uploader": platform_info.platform.value},
+                1,
+            )
+        except Exception:
+            media = []
+        if media:
+            return UniversalPost(
+                post_id=safe_filename_part(str(self._post_id_from_url(source_url) or "clipora")),
+                author=platform_info.platform.value,
+                platform=platform_info.platform.value,
+                source_url=url,
+                title=None,
+                caption=None,
+                media=media,
             )
 
-            if video_like:
-                try:
-                    # Tunnel the file through the backend so the phone does not have to
-                    # fetch CDN/HLS URLs that 403 outside a browser session.
-                    entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
-                except Exception:
-                    if not entry_media:
-                        raise
-
-            if not entry_media and video_like:
-                entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
-
-            media.extend(entry_media)
-
-        media = self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA]
-        if not media:
-            try:
-                media = await loop.run_in_executor(
-                    None, self._download_to_cache, self._entry_url(info, source_url), info, 1
-                )
-            except Exception:
-                media = []
-        if not media:
-            raise ValueError(self._no_media_message(platform_info.platform))
-
-        post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora"))
-        author = safe_filename_part(str(info.get("uploader") or info.get("channel") or platform_info.platform.value))
-        title = info.get("title") or info.get("fulltitle")
-        caption = info.get("description") or title
-
-        return UniversalPost(
-            post_id=post_id,
-            author=author,
-            platform=platform_info.platform.value,
-            source_url=url,
-            title=title,
-            caption=caption,
-            media=media,
+        fallback = await loop.run_in_executor(
+            None, self._public_fallback_post, url, source_url, platform_info.platform
         )
+        if fallback and fallback.media:
+            return fallback
+        if extract_error is not None and self._is_login_walled(extract_error):
+            raise ValueError(
+                "This post is private or requires an account login. Clipora resolves public/shareable links only."
+            ) from extract_error
+        raise ValueError(self._no_media_message(platform_info.platform)) from extract_error
 
     def _extract_info(self, url: str) -> dict[str, Any]:
         platform = detect_platform(url).platform
@@ -249,9 +258,11 @@ class UniversalProvider:
             detail = "unknown error"
         else:
             detail = str(last_error).strip() or type(last_error).__name__
-        raise ValueError(
-            f"yt-dlp could not extract media from this {platform.value} link. {detail}"
-        ) from last_error
+        if self._is_login_walled(last_error or ValueError(detail)):
+            raise ValueError(
+                "This post is private or requires an account login. Clipora resolves public/shareable links only."
+            ) from last_error
+        raise ValueError(self._no_media_message(platform)) from last_error
 
     def _extract_attempts(
         self, extractor_url: str, original_url: str, platform: Platform, allow_playlist: bool
@@ -438,6 +449,7 @@ class UniversalProvider:
         "fb.me",
         "l.instagram.com",
         "lm.facebook.com",
+        "l.facebook.com",
         "t.snapchat.com",
         "instagr.am",
         "www.instagr.am",
@@ -450,7 +462,9 @@ class UniversalProvider:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
         path = parsed.path or ""
-        instagram_share = host.endswith("instagram.com") and path.startswith("/share")
+        instagram_share = host.endswith("instagram.com") and (
+            path.startswith("/share") or path.startswith("/stories/share")
+        )
         if host not in cls._SHORT_SHARE_HOSTS and not instagram_share:
             return url
         try:
@@ -513,6 +527,316 @@ class UniversalProvider:
             return False
         return any(host == domain or host.endswith("." + domain) for domain in family)
 
+    @staticmethod
+    def _is_login_walled(error: Exception) -> bool:
+        text = str(error).lower()
+        return any(
+            token in text
+            for token in (
+                "registered users",
+                "cookies-from-browser",
+                "--cookies",
+                "login required",
+                "please log in",
+                "sign in",
+                "private video",
+                "only available for registered",
+            )
+        )
+
+    def _image_fallback_from_info(self, info: dict[str, Any]) -> list[UniversalMedia]:
+        clone = {key: value for key, value in info.items() if key != "formats"}
+        clone["formats"] = []
+        url = str(info.get("url") or "")
+        protocol = str(info.get("protocol") or "").lower()
+        if url.endswith(".m3u8") or "m3u8" in protocol:
+            clone.pop("url", None)
+        return self._extract_media_items(clone)
+
+    def _public_fallback_post(self, original_url: str, source_url: str, platform: Platform) -> Optional[UniversalPost]:
+        media: list[UniversalMedia] = []
+        if platform == Platform.X:
+            media = self._extract_x_public_media(original_url) or self._extract_x_public_media(source_url)
+        if not media:
+            for candidate in self._fallback_page_urls(original_url, source_url, platform):
+                media = self._scrape_public_html_media(candidate, platform)
+                if media:
+                    break
+        if not media:
+            return None
+        if platform in {Platform.INSTAGRAM, Platform.FACEBOOK}:
+            tunneled: list[UniversalMedia] = []
+            for index, item in enumerate(media[: self._MAX_PLAYLIST_MEDIA], start=1):
+                try:
+                    tunneled.append(
+                        self._cache_http_media(
+                            item.url, item.media_type, original_url, index, item.width, item.height
+                        )
+                    )
+                except Exception:
+                    tunneled.append(item)
+            media = tunneled
+        post_id = self._post_id_from_url(source_url) or self._post_id_from_url(original_url) or "clipora"
+        if platform == Platform.X:
+            post_id = self._x_status_id(original_url) or post_id
+        elif platform == Platform.INSTAGRAM:
+            post_id = self._instagram_shortcode(source_url) or self._instagram_shortcode(original_url) or post_id
+        return UniversalPost(
+            post_id=safe_filename_part(str(post_id)),
+            author=platform.value,
+            platform=platform.value,
+            source_url=original_url,
+            title=None,
+            caption=None,
+            media=self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA],
+        )
+
+    def _fallback_page_urls(self, original_url: str, source_url: str, platform: Platform) -> list[str]:
+        urls: list[str] = []
+        for candidate in (source_url, original_url):
+            if candidate not in urls:
+                urls.append(candidate)
+        if platform == Platform.INSTAGRAM:
+            code = self._instagram_shortcode(source_url) or self._instagram_shortcode(original_url)
+            if code:
+                for path in (
+                    f"https://www.instagram.com/p/{code}/",
+                    f"https://www.instagram.com/reel/{code}/",
+                    f"https://www.instagram.com/p/{code}/embed/",
+                ):
+                    if path not in urls:
+                        urls.append(path)
+        elif platform == Platform.X:
+            status_id = self._x_status_id(original_url) or self._x_status_id(source_url)
+            if status_id:
+                for path in (f"https://x.com/i/status/{status_id}", f"https://twitter.com/i/status/{status_id}"):
+                    if path not in urls:
+                        urls.append(path)
+        elif platform == Platform.FACEBOOK:
+            plugin = f"https://www.facebook.com/plugins/video.php?href={quote(original_url, safe='')}"
+            urls.append(plugin)
+        return urls
+
+    @classmethod
+    def _instagram_shortcode(cls, url: str) -> Optional[str]:
+        match = cls._IG_SHORTCODE.search(urlparse(url).path or "")
+        return match.group(1) if match else None
+
+    @classmethod
+    def _x_status_id(cls, url: str) -> Optional[str]:
+        match = cls._X_STATUS_ID.search(urlparse(url).path or "")
+        return match.group(1) if match else None
+
+    def _extract_x_public_media(self, url: str) -> list[UniversalMedia]:
+        status_id = self._x_status_id(url)
+        if not status_id:
+            return []
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json,text/html,*/*",
+        }
+        endpoints = (
+            f"https://api.fxtwitter.com/status/{status_id}",
+            f"https://api.vxtwitter.com/Twitter/status/{status_id}",
+        )
+        for endpoint in endpoints:
+            try:
+                with httpx.Client(follow_redirects=True, timeout=12.0, headers=headers) as client:
+                    response = client.get(endpoint)
+                    if response.status_code >= 400:
+                        continue
+                    payload = response.json()
+            except Exception:
+                continue
+            media = self._media_from_x_payload(payload)
+            if media:
+                return media
+        return []
+
+    def _media_from_x_payload(self, payload: Any) -> list[UniversalMedia]:
+        if not isinstance(payload, dict):
+            return []
+        tweet = payload.get("tweet") if isinstance(payload.get("tweet"), dict) else payload
+        items: list[UniversalMedia] = []
+        media_node = tweet.get("media") if isinstance(tweet, dict) else None
+        if isinstance(media_node, dict):
+            videos = media_node.get("videos") or media_node.get("video") or []
+            if isinstance(videos, dict):
+                videos = [videos]
+            if isinstance(videos, list):
+                for video in videos:
+                    url = video.get("url") if isinstance(video, dict) else None
+                    if isinstance(url, str) and self._url_looks_like_video(url, key_hint="video_url"):
+                        items.append(
+                            UniversalMedia(
+                                media_type="video",
+                                url=url,
+                                mime_type="video/mp4",
+                                width=self._int_or_none(video.get("width") if isinstance(video, dict) else None),
+                                height=self._int_or_none(video.get("height") if isinstance(video, dict) else None),
+                            )
+                        )
+            if not items:
+                photos = media_node.get("photos") or media_node.get("images") or []
+                if isinstance(photos, list):
+                    for photo in photos:
+                        url = photo.get("url") if isinstance(photo, dict) else photo
+                        image = self._media_from_url(str(url or ""), key_hint="image_url")
+                        if image:
+                            if isinstance(photo, dict):
+                                image.width = image.width or self._int_or_none(photo.get("width"))
+                                image.height = image.height or self._int_or_none(photo.get("height"))
+                            items.append(image)
+        extended = tweet.get("media_extended") if isinstance(tweet, dict) else None
+        if isinstance(extended, list) and not items:
+            for node in extended:
+                if not isinstance(node, dict):
+                    continue
+                url = str(node.get("url") or node.get("media_url") or "")
+                kind = str(node.get("type") or "").lower()
+                if kind == "video" or self._url_looks_like_video(url, key_hint="video_url"):
+                    video = self._media_from_url(url, key_hint="video_url")
+                    if video:
+                        items.append(video)
+                else:
+                    image = self._media_from_url(url, key_hint="image_url")
+                    if image:
+                        items.append(image)
+        urls = tweet.get("mediaURLs") if isinstance(tweet, dict) else None
+        if isinstance(urls, list) and not items:
+            for raw in urls:
+                media = self._media_from_url(str(raw or ""), key_hint="image_url video_url")
+                if media:
+                    items.append(media)
+        videos = [item for item in items if item.media_type == "video"]
+        return self._dedupe_media(videos or items)[: self._MAX_PLAYLIST_MEDIA]
+
+    def _scrape_public_html_media(self, url: str, platform: Platform) -> list[UniversalMedia]:
+        html = self._fetch_public_html(url, platform)
+        if not html:
+            return []
+        items: list[UniversalMedia] = []
+        if platform in {Platform.INSTAGRAM, Platform.FACEBOOK}:
+            parser = ThreadsHtmlParser()
+            carousel = parser._extract_carousel(html)
+            if carousel:
+                source = carousel
+            else:
+                videos = parser._extract_videos(html)
+                source = videos or parser._extract_images(html)
+            for item in source:
+                media = UniversalMedia(
+                    media_type=item.media_type,
+                    url=item.url,
+                    mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
+                    width=item.width,
+                    height=item.height,
+                    quality=self._quality_label(item.width, item.height),
+                )
+                items.append(media)
+        og_video = self._html_meta(html, "og:video") or self._html_meta(html, "og:video:secure_url")
+        og_image = self._html_meta(html, "og:image") or self._html_meta(html, "twitter:image")
+        if og_video:
+            video = self._media_from_url(og_video, key_hint="og:video video_url")
+            if video:
+                items.insert(0, video)
+        if og_image and not any(item.media_type == "video" for item in items):
+            image = self._media_from_url(og_image, key_hint="og:image image_url")
+            if image:
+                items.append(image)
+        if platform == Platform.PINTEREST:
+            items.extend(self._pinterest_images_from_html(html))
+        items = [item for item in items if self._fallback_host_allowed(item.url, platform)]
+        videos = [item for item in items if item.media_type == "video"]
+        if videos:
+            return self._dedupe_media(videos)[: self._MAX_PLAYLIST_MEDIA]
+        return self._dedupe_media(items)[: self._MAX_PLAYLIST_MEDIA]
+
+    def _pinterest_images_from_html(self, html: str) -> list[UniversalMedia]:
+        items: list[UniversalMedia] = []
+        for match in re.finditer(r"https://i\.pinimg\.com/[^\"'\s<>]+", html, re.I):
+            image = self._media_from_url(match.group(0).rstrip("\\"), key_hint="og:image image_url")
+            if image:
+                items.append(image)
+        originals = [item for item in items if "/originals/" in item.url]
+        return originals or items
+
+    def _fetch_public_html(self, url: str, platform: Platform) -> str:
+        family = self._host_family(platform)
+        profiles = (
+            {"User-Agent": "facebookexternalhit/1.1", "Accept": "text/html,*/*"},
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        for headers in profiles:
+            current = url
+            seen: set[str] = set()
+            try:
+                with httpx.Client(follow_redirects=False, timeout=15.0, headers=headers) as client:
+                    for _ in range(8):
+                        if current in seen:
+                            break
+                        seen.add(current)
+                        response = client.get(current)
+                        html = response.text or ""
+                        location = str(response.headers.get("location") or "").strip()
+                        if response.status_code < 400 and html and (
+                            "og:image" in html
+                            or "og:video" in html
+                            or "video_versions" in html
+                            or "pinimg.com" in html
+                            or "pbs.twimg.com" in html
+                        ):
+                            return html
+                        if not location:
+                            if response.status_code < 400:
+                                return html
+                            break
+                        nxt = urljoin(current, location)
+                        if family and not self._host_in_family(nxt, family) and platform != Platform.FACEBOOK:
+                            break
+                        current = nxt
+            except (httpx.HTTPError, ValueError):
+                continue
+        return ""
+
+    @staticmethod
+    def _html_meta(source: str, property_name: str) -> Optional[str]:
+        match = re.search(
+            rf'<meta[^>]+(?:property|name)="{re.escape(property_name)}"[^>]+content="([^"]+)"',
+            source,
+            re.I,
+        )
+        if not match:
+            match = re.search(
+                rf'<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="{re.escape(property_name)}"',
+                source,
+                re.I,
+            )
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def _fallback_host_allowed(url: str, platform: Platform) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        if platform == Platform.INSTAGRAM:
+            return "cdninstagram.com" in host or "fbcdn.net" in host
+        if platform == Platform.FACEBOOK:
+            return "fbcdn.net" in host or "facebook.com" in host or "cdninstagram.com" in host
+        if platform == Platform.PINTEREST:
+            return "pinimg.com" in host or "pinterest.com" in host
+        if platform == Platform.X:
+            return "twimg.com" in host or "twitter.com" in host or "x.com" in host
+        return url.startswith(("http://", "https://"))
+
     def _extract_info_with_opts(self, url: str, opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
             info = ydl.extract_info(url, download=False)
@@ -527,17 +851,24 @@ class UniversalProvider:
         opts["noplaylist"] = not allow_playlist
 
         platform = detect_platform(url).platform
-        if platform == Platform.X:
-            opts["extractor_args"] = {"twitter": {"api": ["syndication"]}}
-        elif platform == Platform.YOUTUBE:
+        if platform == Platform.YOUTUBE:
+            opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
             opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv"]}}
+        elif platform == Platform.X:
+            opts["extractor_args"] = {"twitter": {"api": ["syndication", "graphql"]}}
         elif platform == Platform.TIKTOK:
             # TikTok's extractor owns its User-Agent and Referer. webpage_download
             # helps photo slideshows that have no playable video format.
             headers.pop("User-Agent", None)
             opts["extractor_args"] = {"tiktok": {"webpage_download": ["True"]}}
-        elif platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.SNAPCHAT, Platform.PINTEREST}:
-            headers["Referer"] = f"https://{urlparse(url).hostname or ''}/"
+        elif platform == Platform.INSTAGRAM:
+            headers["Referer"] = "https://www.instagram.com/"
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
+        elif platform in {Platform.FACEBOOK, Platform.SNAPCHAT, Platform.PINTEREST}:
+            headers["Referer"] = f"https://{urlparse(url).hostname or 'www.facebook.com'}/"
 
         return opts
 
@@ -558,7 +889,14 @@ class UniversalProvider:
             return True
         if info.get("url") or info.get("images") or info.get("image_post_info") or info.get("carousel_media"):
             return True
-        return bool(info.get("imagePostInfo") or info.get("aweme_detail"))
+        if info.get("imagePostInfo") or info.get("aweme_detail"):
+            return True
+        thumbs = info.get("thumbnails")
+        if isinstance(thumbs, list) and any(
+            isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://")) for item in thumbs
+        ):
+            return True
+        return False
 
     def _entry_infos(self, info: dict[str, Any]) -> list[dict[str, Any]]:
         raw_entries = info.get("entries")
@@ -1133,6 +1471,8 @@ class UniversalProvider:
                 or "urllist" in hint
                 or "carousel" in hint
                 or "photomode" in hint
+                or ("pbs.twimg.com" in lower and ("/media/" in lower or "format=jpg" in lower or "format=png" in lower))
+                or "i.pinimg.com" in lower
                 or ("tiktokcdn" in lower and any(token in hint for token in ("image", "photo", "display", "slide")))
             )
         )

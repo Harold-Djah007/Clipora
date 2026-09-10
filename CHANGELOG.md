@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.6+51 Public photo fallbacks for Pinterest, Instagram, X, and Facebook
+- Pinterest HLS pins now save the pin image when FFmpeg is missing instead of failing the download.
+- Instagram photo/reel pages scrape public `og:image` / carousel JSON when yt-dlp reports "no video formats".
+- X image tweets use a public syndication fallback when the tweet has photos but no video.
+- Facebook login-walled videos no longer dump cookie instructions; public embeds are still tried first.
+- Resolver errors never show yt-dlp GitHub issue URLs.
+
 ## 2.0.6+50 Queue more links and harden every saver
 - Instagram, X, YouTube, Pinterest, Facebook, and Snapchat now use the same yt-dlp retry and file-tunnel fallback as TikTok.
 - Threads public pages expand share and `/t/` links, keep mixed photo/video carousels, pick the highest CDN variant, and ignore poster-only video pages.

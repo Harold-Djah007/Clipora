@@ -403,6 +403,114 @@ def test_instagram_download_fallback_when_extract_raises(monkeypatch):
     assert post.platform == "instagram"
 
 
+def test_pinterest_hls_falls_back_to_pin_image(monkeypatch):
+    provider = UniversalProvider()
+    info = {
+        "id": "123456789",
+        "uploader": "pin",
+        "url": "https://v.pinimg.com/videos/mc/hls/abc.m3u8",
+        "ext": "mp4",
+        "protocol": "m3u8_native",
+        "formats": [
+            {
+                "url": "https://v.pinimg.com/videos/mc/hls/abc.m3u8",
+                "ext": "mp4",
+                "protocol": "m3u8_native",
+                "vcodec": "h264",
+                "height": 1080,
+            }
+        ],
+        "thumbnails": [
+            {"url": "https://i.pinimg.com/originals/ab/cd/ef.jpg", "width": 1000, "height": 1500},
+        ],
+    }
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Install ffmpeg")))
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.pinterest.com/pin/123456789/"))
+
+    assert post.platform == "pinterest"
+    assert post.media[0].media_type == "image"
+    assert post.media[0].url.endswith("ef.jpg")
+
+
+def test_instagram_photo_html_fallback_when_ytdlp_has_no_video(monkeypatch):
+    provider = UniversalProvider()
+    html = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/photo.jpg">'
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(ValueError("No video formats found!")))
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_fetch_public_html", lambda url, platform: html)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip tunnel")),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/p/DdFUKwBPwlI/"))
+
+    assert post.platform == "instagram"
+    assert post.media[0].media_type == "image"
+    assert "photo.jpg" in post.media[0].url
+
+
+def test_x_image_tweet_uses_fxtwitter_when_ytdlp_has_no_video(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("No video could be found in this tweet")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        provider,
+        "_extract_x_public_media",
+        lambda url: [
+            UniversalMedia(media_type="image", url="https://pbs.twimg.com/media/abc.jpg", width=1200, height=800)
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://x.com/bigarms4me/status/2097437821501894661"))
+
+    assert post.platform == "x"
+    assert post.media[0].media_type == "image"
+    assert post.media[0].url.endswith("abc.jpg")
+
+
+def test_media_from_x_payload_keeps_photos():
+    provider = UniversalProvider()
+    media = provider._media_from_x_payload(
+        {
+            "tweet": {
+                "media": {
+                    "photos": [{"url": "https://pbs.twimg.com/media/hello.jpg", "width": 800, "height": 600}]
+                }
+            }
+        }
+    )
+    assert len(media) == 1
+    assert media[0].media_type == "image"
+    assert media[0].url.endswith("hello.jpg")
+
+
+def test_facebook_login_wall_is_public_only_message(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This video is only available for registered users. Use --cookies-from-browser")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_public_fallback_post", lambda *args, **kwargs: None)
+
+    try:
+        asyncio.run(provider._resolve_with_ytdlp("https://www.facebook.com/watch/?v=1081678357921979"))
+    except ValueError as exc:
+        assert "login" in str(exc).lower() or "private" in str(exc).lower()
+        assert "cookies" not in str(exc).lower()
+    else:
+        raise AssertionError("expected login-walled Facebook posts to fail cleanly")
+
+
 def test_resolve_threads_tunnels_cdn_through_files(monkeypatch):
     from app.services.threads_provider import ResolvedMedia, ResolvedPost
 
