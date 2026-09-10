@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0 Clipora 2.0 Smart Save rebuild
+- Rebuilt the mobile Save experience into a cleaner professional Smart Save Command Center.
+- Switched the app shell and launch experience to Clipora 2.0 branding, faster launch timing, glass navigation, and a cleaner premium dark system.
+- Kept Threads on the existing local smart-capture path as requested.
+- Rebuilt the non-Threads downloader direction around a mature extractor-style route: yt-dlp backend engine, cobalt-style response/picker thinking, Seal-style mobile workflow ideas, and gallery-dl-style nested media/carousel scanning.
+- Strengthened non-Threads extraction with nested media scanning, playlist/story preservation, signed URL dedupe, best-quality selection, server cache/proxy for hard video/CDN cases, and up to 20 carousel/story items.
+- Preserved commercial safety boundaries: no watermark-removal feature, no platform password collection, no private-access bypassing.
+
 ## 0.8.8 Extractor-pipeline universal saver
 - Upgraded the non-Threads universal backend toward the same architecture used by strong open-source downloaders: site extractors first, playlist/story entries preserved, nested media URL scanning, backend media proxy/cache for videos, and host/path dedupe for signed URLs.
 - Threads remains unchanged on its local Smart Capture path.
