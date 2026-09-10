@@ -1,13 +1,11 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
-
 import '../models/media_models.dart';
 import '../services/download_manager.dart';
 import '../services/history_store.dart';
-import '../services/platform_services.dart';
 import '../services/session_service.dart';
 import '../services/settings_store.dart';
+import '../services/platform_services.dart';
 import '../services/universal_platform_detector.dart';
 import '../services/universal_resolver_service.dart';
 
@@ -74,11 +72,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Builds a save plan from pasted links using the hosted resolver only.
+  /// Resolver-only media plan.
   ///
-  /// Clipora Instant no longer opens a phone WebView for Snapchat, Threads,
-  /// TikTok, Instagram, X, Pinterest, Facebook, or YouTube. Every supported
-  /// platform is automatic: paste/share -> resolver extracts -> APK saves.
+  /// No platform opens a social page inside the APK anymore. Share/paste sends the
+  /// URL to the configured Clipora resolver, then the APK saves the media returned
+  /// by that resolver. This is the Pinget-style route the app now uses for every
+  /// supported platform, including Threads.
   Future<List<ResolvedPost>> scanForMedia(
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
@@ -100,13 +99,14 @@ class AppState extends ChangeNotifier {
         final url = urls[i];
         final platform = UniversalPlatformDetector.detect(url);
         status = 'Resolving ${platform.label} ${i + 1}/${urls.length}…';
+        await PlatformServices.updateDownloadService(message: status!);
         notifyListeners();
 
         try {
           if (!platform.isSupported) {
             throw StateError('Unsupported link. Clipora supports ${UniversalPlatformDetector.supportedLabel}.');
           }
-          debugPrint('[Clipora] instant resolver-only ${platform.label}: $url');
+          debugPrint('[Clipora] resolver-only ${platform.label}: $url');
           final post = await _resolvePost(url, platform);
           debugPrint('[Clipora] resolver found ${post.media.length} media item(s) for ${post.postId} via ${platform.label}');
           posts.add(post);
@@ -126,6 +126,7 @@ class AppState extends ChangeNotifier {
       status = errors.isEmpty
           ? 'Found $totalMedia media item${totalMedia == 1 ? '' : 's'}. Saving now…'
           : 'Found $totalMedia item${totalMedia == 1 ? '' : 's'}; ${errors.length} link${errors.length == 1 ? '' : 's'} failed. Saving what worked…';
+      await PlatformServices.updateDownloadService(message: status!);
       return posts;
     } finally {
       activeJobs = activeJobs > 0 ? activeJobs - 1 : 0;
@@ -177,7 +178,7 @@ class AppState extends ChangeNotifier {
             errors.addAll(postFailures.map((record) => record.error ?? 'Unknown download error'));
           }
         } catch (e, st) {
-          debugPrint('[Clipora] instant save failed: $e\n$st');
+          debugPrint('[Clipora] save failed: $e\n$st');
           failed++;
           errors.add(_friendlyError(e));
         }
@@ -217,14 +218,30 @@ class AppState extends ChangeNotifier {
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
   }) async {
-    final posts = await scanForMedia(urls, sourceLoader: sourceLoader);
-    return saveResolvedMedia(posts);
+    await PlatformServices.startDownloadService(
+      message: 'Clipora accepted the link. You can keep watching; resolving continues in the background.',
+    );
+    try {
+      final posts = await scanForMedia(urls, sourceLoader: sourceLoader);
+      return await saveResolvedMedia(posts);
+    } catch (error) {
+      lastRunHadErrors = true;
+      status = _friendlyError(error);
+      await PlatformServices.showDownloadComplete(
+        title: 'Clipora could not save media',
+        message: status!,
+        success: false,
+      );
+      await PlatformServices.stopDownloadService();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<ResolvedPost> _resolvePost(String url, PlatformMatch platform) async {
     if (!universalResolver.hasConfiguredBackend) {
       throw StateError(
-        'Clipora Instant needs a hosted resolver URL to stay fully automatic. No platform uses the old phone page-capture flow anymore, including Threads. Add a resolver in Settings or build the APK with --dart-define=CLIPORA_RESOLVER_URL=https://your-resolver-domain.',
+        'Clipora Instant needs a hosted resolver URL to stay fully automatic. Build the APK with --dart-define=CLIPORA_RESOLVER_URL=https://your-resolver-domain or add one in Settings.',
       );
     }
 
