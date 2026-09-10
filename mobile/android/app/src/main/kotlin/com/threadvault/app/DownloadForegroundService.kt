@@ -24,7 +24,7 @@ class DownloadForegroundService : Service() {
         val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Saving media…"
         ensureChannels(this)
         startForeground(NOTIFICATION_ID, buildProgressNotification(this, title, message))
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -48,7 +48,6 @@ class DownloadForegroundService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "clipora_downloads"
-        private const val COMPLETE_CHANNEL_ID = "clipora_download_complete"
         private const val NOTIFICATION_ID = 7107
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_MESSAGE = "message"
@@ -66,10 +65,13 @@ class DownloadForegroundService : Service() {
         }
 
         fun complete(context: Context, title: String, message: String, success: Boolean) {
-            ensureChannels(context)
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
-            manager.notify(notificationId, buildCompleteNotification(context, title, message, success))
+            CliporaNotifications.notifyResult(
+                context,
+                title,
+                message,
+                success,
+                avoidIds = intArrayOf(NOTIFICATION_ID),
+            )
         }
 
         fun stop(context: Context) {
@@ -87,16 +89,8 @@ class DownloadForegroundService : Service() {
                 description = "Keeps Clipora downloads alive while the app is in the background."
                 setShowBadge(false)
             }
-            val complete = NotificationChannel(
-                COMPLETE_CHANNEL_ID,
-                "Clipora finished downloads",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Shows when Clipora has finished saving media."
-                setShowBadge(true)
-            }
             manager.createNotificationChannel(progress)
-            manager.createNotificationChannel(complete)
+            CliporaNotifications.ensureResultChannel(context)
         }
 
         private fun buildProgressNotification(context: Context, title: String, message: String): Notification {
@@ -116,26 +110,6 @@ class DownloadForegroundService : Service() {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_PROGRESS)
-                .build()
-        }
-
-        private fun buildCompleteNotification(context: Context, title: String, message: String, success: Boolean): Notification {
-            val pendingIntent = launchPendingIntent(context)
-            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(context, COMPLETE_CHANNEL_ID)
-            } else {
-                @Suppress("DEPRECATION")
-                Notification.Builder(context)
-            }
-
-            return builder
-                .setContentTitle(title)
-                .setContentText(message)
-                .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-                .setContentIntent(pendingIntent)
-                .setOngoing(false)
-                .setAutoCancel(true)
-                .setCategory(Notification.CATEGORY_STATUS)
                 .build()
         }
 

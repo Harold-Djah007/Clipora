@@ -48,4 +48,4 @@ POST /api/downloads
 
 ## Next mobile task
 
-Phone testing: start the backend with `scripts/start_api.ps1`, set Resolver URL in the app to the printed LAN address, then share or paste a public TikTok or X link.
+Phone testing: follow `local-backend-test.md`. Start the backend with `scripts/start_api.ps1`, map USB with `adb reverse tcp:8010 tcp:8010`, build the debug APK with `--dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010`, then share a public TikTok link to Clipora.

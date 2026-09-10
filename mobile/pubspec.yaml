@@ -1,7 +1,7 @@
 name: threadvault
 description: Clipora 2.0 premium instant media saver with share-to-download UX, resolver-only engine for every platform, background saving, carousel saving up to 20 items, and commercial-grade dark UI.
 publish_to: 'none'
-version: 2.0.6+47
+version: 2.0.6+53
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

@@ -109,13 +109,13 @@ class UniversalPlatformDetector {
       platform = SocialPlatform.instagram;
     } else if (_matches(host, const ['x.com', 'twitter.com', 'mobile.twitter.com'])) {
       platform = SocialPlatform.x;
-    } else if (_matches(host, const ['pinterest.com', 'pin.it'])) {
+    } else if (_matches(host, const ['pinterest.com', 'pin.it']) || host.startsWith('pinterest.')) {
       platform = SocialPlatform.pinterest;
-    } else if (_matches(host, const ['facebook.com', 'm.facebook.com', 'fb.watch'])) {
+    } else if (_matches(host, const ['facebook.com', 'm.facebook.com', 'fb.watch', 'fb.me'])) {
       platform = SocialPlatform.facebook;
-    } else if (_matches(host, const ['snapchat.com', 'story.snapchat.com'])) {
+    } else if (_matches(host, const ['snapchat.com', 'story.snapchat.com', 't.snapchat.com'])) {
       platform = SocialPlatform.snapchat;
-    } else if (_matches(host, const ['youtube.com', 'm.youtube.com', 'youtu.be'])) {
+    } else if (_matches(host, const ['youtube.com', 'm.youtube.com', 'youtu.be', 'youtube-nocookie.com'])) {
       platform = SocialPlatform.youtube;
     }
 
@@ -123,6 +123,66 @@ class UniversalPlatformDetector {
   }
 
   static List<PlatformMatch> detectAll(Iterable<String> urls) => urls.map(detect).toList(growable: false);
+
+  static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
+  static final _facebookPathId = RegExp(r'/(?:reel|reels|videos|watch|share/v|share/r|share/reel)/([A-Za-z0-9_-]+)', caseSensitive: false);
+
+  static List<String> extractShareUrls(String raw) {
+    final found = <String>[];
+    for (final match in _urlPattern.allMatches(raw)) {
+      found.add(match.group(0)!.replaceAll(RegExp(r'[),.;]+$'), ''));
+    }
+    return normalizeShareUrls(found);
+  }
+
+  static List<String> normalizeShareUrls(Iterable<String> urls) {
+    final unwrapped = <String>[];
+    for (final raw in urls) {
+      final value = unwrapFacebookClickWrapper(raw.trim());
+      if (value.isEmpty || isFacebookClickWrapper(value)) continue;
+      if (!detect(value).isSupported) continue;
+      unwrapped.add(value);
+    }
+    final seen = <String>{};
+    final out = <String>[];
+    for (final url in unwrapped) {
+      if (seen.add(_identityKey(url))) out.add(url);
+    }
+    return out.take(20).toList(growable: false);
+  }
+
+  static String unwrapFacebookClickWrapper(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final path = uri.path.toLowerCase();
+    if (!path.endsWith('/l.php') && !path.endsWith('l.php')) return url;
+    final dest = uri.queryParameters['u'];
+    if (dest == null || dest.isEmpty) return url;
+    if (dest.startsWith('http://') || dest.startsWith('https://')) return dest;
+    return url;
+  }
+
+  static bool isFacebookClickWrapper(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    final path = uri.path.toLowerCase();
+    return path.endsWith('/l.php') || path.endsWith('l.php');
+  }
+
+  static String _identityKey(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final videoId = uri.queryParameters['v'];
+    if (videoId != null && videoId.length >= 5 && (host.contains('facebook.com') || host.contains('fb.watch'))) {
+      return 'facebook:id:$videoId';
+    }
+    final pathMatch = _facebookPathId.firstMatch(uri.path);
+    if (pathMatch != null && (host.contains('facebook.com') || host.contains('fb.watch') || host.contains('fb.me'))) {
+      return 'facebook:id:${pathMatch.group(1)}';
+    }
+    return '$host${uri.path}'.toLowerCase();
+  }
 
   static bool _matches(String host, List<String> allowed) {
     return allowed.any((item) => host == item || host.endsWith('.$item'));

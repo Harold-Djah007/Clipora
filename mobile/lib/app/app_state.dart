@@ -21,6 +21,11 @@ class AppState extends ChangeNotifier {
   int lastRunSaved = 0;
   String? status;
   bool lastRunHadErrors = false;
+  final List<_SaveBatch> _queue = [];
+  bool _pumping = false;
+
+  bool get hasWork => busy || _pumping || _queue.isNotEmpty;
+  int get queuedBatches => _queue.length;
 
   Future<void> init() async {
     settings = await settingsStore.load();
@@ -174,31 +179,58 @@ class AppState extends ChangeNotifier {
       busy = activeJobs > 0;
       if (busy) {
         await PlatformServices.updateDownloadService(message: '$activeJobs Clipora task${activeJobs == 1 ? '' : 's'} still running…');
-      } else {
-        await PlatformServices.stopDownloadService();
       }
       notifyListeners();
     }
   }
 
-  Future<bool> resolveAndDownload(List<String> urls) async {
+  Future<bool> resolveAndDownload(List<String> urls) {
+    final batch = _SaveBatch(UniversalPlatformDetector.normalizeShareUrls(urls));
+    final queuedBehindWork = _pumping || _queue.isNotEmpty || busy;
+    _queue.add(batch);
+    if (queuedBehindWork) {
+      status =
+          'Queued ${urls.length} more link${urls.length == 1 ? '' : 's'}. Clipora will save them after the current download.';
+    }
+    notifyListeners();
+    unawaited(_pumpQueue());
+    return batch.done.future;
+  }
+
+  Future<void> _pumpQueue() async {
+    if (_pumping) return;
+    _pumping = true;
     await PlatformServices.startDownloadService(
       message: 'Clipora accepted the link. You can keep watching; resolving continues in the background.',
     );
     try {
-      final posts = await scanForMedia(urls);
-      return await saveResolvedMedia(posts);
-    } catch (error) {
-      lastRunHadErrors = true;
-      status = _friendlyError(error);
-      await PlatformServices.showDownloadComplete(
-        title: 'Clipora could not save media',
-        message: status!,
-        success: false,
-      );
-      await PlatformServices.stopDownloadService();
+      while (_queue.isNotEmpty) {
+        final batch = _queue.removeAt(0);
+        notifyListeners();
+        try {
+          final posts = await scanForMedia(batch.urls);
+          final ok = await saveResolvedMedia(posts);
+          if (!batch.done.isCompleted) batch.done.complete(ok);
+        } catch (error) {
+          lastRunHadErrors = true;
+          status = _friendlyError(error);
+          await PlatformServices.showDownloadComplete(
+            title: 'Clipora could not save media',
+            message: status!,
+            success: false,
+          );
+          notifyListeners();
+          if (!batch.done.isCompleted) batch.done.completeError(error);
+        }
+      }
+    } finally {
+      _pumping = false;
+      if (_queue.isNotEmpty) {
+        unawaited(_pumpQueue());
+      } else if (!busy) {
+        await PlatformServices.stopDownloadService();
+      }
       notifyListeners();
-      rethrow;
     }
   }
 
@@ -229,4 +261,10 @@ class AppState extends ChangeNotifier {
     return text.length <= 360 ? text : '${text.substring(0, 359).trimRight()}…';
   }
 
+}
+
+class _SaveBatch {
+  _SaveBatch(this.urls) : done = Completer<bool>();
+  final List<String> urls;
+  final Completer<bool> done;
 }

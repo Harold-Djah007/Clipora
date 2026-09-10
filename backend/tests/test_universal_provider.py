@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.universal_provider import UniversalProvider
+from app.services.universal_provider import UniversalMedia, UniversalProvider
 
 
 def test_extract_highest_direct_mp4_format():
@@ -165,3 +165,508 @@ def test_tiktok_short_link_expansion_rejects_homepage_redirect(monkeypatch):
     monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
     short = "https://vt.tiktok.com/ZSgU4uAMT/"
     assert provider._expand_tiktok_short_url(short) == short
+
+
+def test_tiktok_short_link_follows_location_header_without_following_homepage(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSqU4uAMT/"
+    canonical = "https://www.tiktok.com/@creator/video/7682000490246262048"
+
+    class Response:
+        def __init__(self, url, location=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "vt.tiktok.com" in url:
+                return Response(url, location=canonical)
+            return Response(url)
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_tiktok_short_url(short) == canonical
+
+
+def test_tiktok_short_link_parses_video_id_from_homepage_html(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSqU4uAMT/"
+
+    class Response:
+        def __init__(self, url, location="", text=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = text
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "vt.tiktok.com" in url:
+                return Response(url, location="https://www.tiktok.com/?_r=1")
+            return Response(
+                "https://www.tiktok.com/?_r=1",
+                text='<link rel="canonical" href="https://www.tiktok.com/@creator/video/7682000490246262048">',
+            )
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_tiktok_short_url(short) == "https://www.tiktok.com/@creator/video/7682000490246262048"
+
+
+def test_tiktok_webpage_download_is_enabled_for_photo_posts():
+    provider = UniversalProvider()
+    opts = provider._ydl_opts_for("https://www.tiktok.com/@creator/photo/1234567890123456789")
+    assert opts["extractor_args"]["tiktok"]["webpage_download"] == ["True"]
+    assert "User-Agent" not in opts["http_headers"]
+
+
+def test_tiktok_slideshow_images_when_no_video_exists():
+    provider = UniversalProvider()
+    info = {
+        "image_post_info": {
+            "images": [
+                {"imageURL": {"urlList": ["https://p16-sign.tiktokcdn.com/tos-a.jpeg"]}},
+                {"display_image": {"url_list": ["https://p16-sign.tiktokcdn.com/tos-b.jpeg"]}},
+            ]
+        }
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.url for item in media] == [
+        "https://p16-sign.tiktokcdn.com/tos-a.jpeg",
+        "https://p16-sign.tiktokcdn.com/tos-b.jpeg",
+    ]
+    assert all(item.media_type == "image" for item in media)
+
+
+def test_instagram_carousel_media_keeps_each_slide():
+    provider = UniversalProvider()
+    info = {
+        "carousel_media": [
+            {
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/a.jpg", "width": 320, "height": 320},
+                        {"url": "https://scontent.cdninstagram.com/v/t51/a-1080.jpg", "width": 1080, "height": 1080},
+                    ]
+                }
+            },
+            {
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/b.jpg", "width": 1080, "height": 1350},
+                    ]
+                }
+            },
+        ]
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert [item.url for item in media] == [
+        "https://scontent.cdninstagram.com/v/t51/a-1080.jpg",
+        "https://scontent.cdninstagram.com/v/t51/b.jpg",
+    ]
+
+
+def test_tiktok_photo_images_are_not_used_when_video_exists():
+    provider = UniversalProvider()
+    info = {
+        "formats": [
+            {"url": "https://cdn.example/video.mp4", "ext": "mp4", "vcodec": "h264", "height": 720, "width": 1280},
+        ],
+        "images": ["https://cdn.example/slide.jpg"],
+    }
+
+    media = provider._extract_media_items(info)
+
+    assert len(media) == 1
+    assert media[0].media_type == "video"
+    assert media[0].url.endswith("video.mp4")
+
+
+def test_tiktok_download_fallback_when_metadata_has_no_media(monkeypatch):
+    provider = UniversalProvider()
+    info = {"id": "7682000490246262048", "uploader": "creator", "title": "clip"}
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/abc", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.tiktok.com/@creator/video/7682000490246262048"))
+
+    assert post.media[0].url == "/api/files/abc"
+    assert post.platform == "tiktok"
+
+
+def test_tiktok_download_fallback_when_extract_raises(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_expand_tiktok_short_url",
+        lambda url: "https://www.tiktok.com/@creator/video/7682000490246262048",
+    )
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(RuntimeError("")))
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/fallback", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://vt.tiktok.com/ZSqU4uAMT/"))
+
+    assert post.media[0].url == "/api/files/fallback"
+    assert post.platform == "tiktok"
+
+
+def test_pin_it_share_link_stays_on_pinterest(monkeypatch):
+    provider = UniversalProvider()
+    canonical = "https://www.pinterest.com/pin/123456789/"
+
+    class Response:
+        def __init__(self, url, location=""):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url):
+            if "pin.it" in url:
+                return Response(url, location=canonical)
+            return Response(url)
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    assert provider._expand_share_url("https://pin.it/abc123") == canonical
+
+
+def test_youtube_tries_multiple_player_clients():
+    from app.services.platforms import Platform
+
+    provider = UniversalProvider()
+    attempts = provider._extract_attempts(
+        "https://www.youtube.com/shorts/abc",
+        "https://www.youtube.com/shorts/abc",
+        Platform.YOUTUBE,
+        False,
+    )
+    clients = [opts.get("extractor_args", {}).get("youtube", {}).get("player_client") for _, opts in attempts]
+    assert ["mweb", "tv"] in clients
+    assert ["android", "ios"] in clients
+
+
+def test_instagram_download_fallback_when_extract_raises(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(RuntimeError("")))
+    monkeypatch.setattr(
+        provider,
+        "_download_to_cache",
+        lambda url, entry, index=1: [
+            UniversalMedia(media_type="video", url="/api/files/ig", mime_type="video/mp4")
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/ABC123/"))
+
+    assert post.media[0].url == "/api/files/ig"
+    assert post.platform == "instagram"
+
+
+def test_pinterest_hls_rewrites_to_progressive_mp4(monkeypatch):
+    provider = UniversalProvider()
+    info = {
+        "id": "123456789",
+        "uploader": "pin",
+        "url": "https://v.pinimg.com/videos/mc/hls/abc.m3u8",
+        "ext": "mp4",
+        "protocol": "m3u8_native",
+        "formats": [
+            {
+                "url": "https://v.pinimg.com/videos/mc/hls/abc.m3u8",
+                "ext": "mp4",
+                "protocol": "m3u8_native",
+                "vcodec": "h264",
+                "height": 1080,
+            }
+        ],
+        "thumbnails": [
+            {"url": "https://i.pinimg.com/originals/ab/cd/ef.jpg", "width": 1000, "height": 1500},
+        ],
+    }
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Install ffmpeg")))
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type="video",
+            url="/api/files/pinvid",
+            mime_type="video/mp4",
+            width=width,
+            height=height,
+        )
+        if media_type == "video" and url.endswith(".mp4")
+        else (_ for _ in ()).throw(RuntimeError("skip")),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.pinterest.com/pin/123456789/"))
+
+    assert post.platform == "pinterest"
+    assert post.media[0].media_type == "video"
+    assert post.media[0].url == "/api/files/pinvid"
+
+
+def test_pinterest_photo_pin_still_saves_image(monkeypatch):
+    provider = UniversalProvider()
+    info = {
+        "id": "123456789",
+        "uploader": "pin",
+        "url": "https://i.pinimg.com/originals/ab/cd/ef.jpg",
+        "ext": "jpg",
+        "thumbnails": [
+            {"url": "https://i.pinimg.com/originals/ab/cd/ef.jpg", "width": 1000, "height": 1500},
+        ],
+    }
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.pinterest.com/pin/123456789/"))
+
+    assert post.platform == "pinterest"
+    assert post.media[0].media_type == "image"
+    assert post.media[0].url.endswith("ef.jpg")
+
+
+def test_instagram_photo_html_fallback_when_ytdlp_has_no_video(monkeypatch):
+    provider = UniversalProvider()
+    html = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/photo.jpg">'
+    monkeypatch.setattr(provider, "_extract_info", lambda url: (_ for _ in ()).throw(ValueError("No video formats found!")))
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_fetch_public_html", lambda url, platform: html)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip tunnel")),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/p/DdFUKwBPwlI/"))
+
+    assert post.platform == "instagram"
+    assert post.media[0].media_type == "image"
+    assert "photo.jpg" in post.media[0].url
+
+
+def test_instagram_reel_does_not_save_poster_png(monkeypatch):
+    provider = UniversalProvider()
+    html = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/poster.png">'
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This content isn't available to everyone: It can't be seen by certain audiences.")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_fetch_public_html", lambda url, platform: html)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip tunnel")),
+    )
+
+    try:
+        asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/Dcx91FCMXrJ/"))
+    except ValueError as exc:
+        assert "instagram" in str(exc).lower()
+        assert "poster.png" not in str(exc).lower()
+    else:
+        raise AssertionError("expected Instagram reels without a public video to fail instead of saving a poster")
+
+
+def test_instagram_reel_uses_embed_video_when_page_is_poster_only(monkeypatch):
+    provider = UniversalProvider()
+    poster = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/poster.png">'
+    embed = '{"video_versions":[{"url":"https://scontent.cdninstagram.com/v/t50.2886-16/clip.mp4"}]}'
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This content isn't available to everyone")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        provider,
+        "_fetch_public_html",
+        lambda url, platform: embed if "/embed" in url else poster,
+    )
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type=media_type,
+            url="/api/files/igreel",
+            mime_type="video/mp4" if media_type == "video" else "image/png",
+            width=width,
+            height=height,
+        ),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/Dcx91FCMXrJ/"))
+
+    assert post.platform == "instagram"
+    assert post.media[0].media_type == "video"
+    assert post.media[0].url == "/api/files/igreel"
+
+
+def test_facebook_lphp_unwraps_to_watch_url():
+    provider = UniversalProvider()
+    wrapped = "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.facebook.com%2Fwatch%2F%3Fv%3D1081678357921979&h=AT"
+    assert provider._unwrap_facebook_click_wrapper(wrapped) == "https://www.facebook.com/watch/?v=1081678357921979"
+
+
+def test_pinterest_hls_rewrite_builds_progressive_urls():
+    urls = UniversalProvider._pinterest_hls_to_mp4s("https://v.pinimg.com/videos/mc/hls/ab/cd/ef.m3u8")
+    assert any(item.endswith("/720p/ab/cd/ef.mp4") for item in urls)
+    assert any("v1.pinimg.com" in item for item in urls)
+
+
+def test_x_image_tweet_uses_fxtwitter_when_ytdlp_has_no_video(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("No video could be found in this tweet")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        provider,
+        "_extract_x_public_media",
+        lambda url: [
+            UniversalMedia(media_type="image", url="https://pbs.twimg.com/media/abc.jpg", width=1200, height=800)
+        ],
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://x.com/bigarms4me/status/2097437821501894661"))
+
+    assert post.platform == "x"
+    assert post.media[0].media_type == "image"
+    assert post.media[0].url.endswith("abc.jpg")
+
+
+def test_media_from_x_payload_keeps_photos():
+    provider = UniversalProvider()
+    media = provider._media_from_x_payload(
+        {
+            "tweet": {
+                "media": {
+                    "photos": [{"url": "https://pbs.twimg.com/media/hello.jpg", "width": 800, "height": 600}]
+                }
+            }
+        }
+    )
+    assert len(media) == 1
+    assert media[0].media_type == "image"
+    assert media[0].url.endswith("hello.jpg")
+
+
+def test_facebook_login_wall_is_public_only_message(monkeypatch):
+    provider = UniversalProvider()
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This video is only available for registered users. Use --cookies-from-browser")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_public_fallback_post", lambda *args, **kwargs: None)
+
+    try:
+        asyncio.run(provider._resolve_with_ytdlp("https://www.facebook.com/watch/?v=1081678357921979"))
+    except ValueError as exc:
+        assert "login" in str(exc).lower() or "private" in str(exc).lower()
+        assert "cookies" not in str(exc).lower()
+    else:
+        raise AssertionError("expected login-walled Facebook posts to fail cleanly")
+
+
+def test_resolve_threads_tunnels_cdn_through_files(monkeypatch):
+    from app.services.threads_provider import ResolvedMedia, ResolvedPost
+
+    provider = UniversalProvider()
+    resolved = ResolvedPost(
+        post_id="ABC",
+        author="alice",
+        caption="hi",
+        media=[ResolvedMedia("video", "https://scontent.cdninstagram.com/v/t1/real.mp4", 720, 1280)],
+    )
+
+    async def fake_resolve(url):
+        return resolved
+
+    monkeypatch.setattr("app.services.universal_provider.threads_provider.resolve", fake_resolve)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type=media_type,
+            url="/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mime_type="video/mp4",
+            width=width,
+            height=height,
+        ),
+    )
+
+    post = asyncio.run(provider._resolve_threads("https://www.threads.com/@alice/post/ABC"))
+
+    assert post.platform == "threads"
+    assert post.media[0].url == "/api/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert post.media[0].media_type == "video"
+
+
+def test_resolve_threads_falls_back_to_direct_cdn_when_tunnel_fails(monkeypatch):
+    from app.services.threads_provider import ResolvedMedia, ResolvedPost
+
+    provider = UniversalProvider()
+    resolved = ResolvedPost(
+        post_id="ABC",
+        author="alice",
+        caption=None,
+        media=[ResolvedMedia("image", "https://scontent.cdninstagram.com/v/t51/photo.jpg", 1440, 1440)],
+    )
+
+    async def fake_resolve(url):
+        return resolved
+
+    monkeypatch.setattr("app.services.universal_provider.threads_provider.resolve", fake_resolve)
+    monkeypatch.setattr(provider, "_cache_http_media", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("403")))
+
+    post = asyncio.run(provider._resolve_threads("https://www.threads.com/@alice/post/ABC"))
+
+    assert post.media[0].url == "https://scontent.cdninstagram.com/v/t51/photo.jpg"

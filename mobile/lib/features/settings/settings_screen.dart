@@ -176,7 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (v) => _update(s.copyWith(maxConcurrentDownloads: v.round())),
               ),
               const Text(
-                'Higher values finish carousels sooner. Lower them on a weak connection.',
+                'Higher values finish carousels sooner. Lower them on a weak connection. Clipora uses a background download notification, then a heads-up result for both successful saves and failures.',
                 style: TextStyle(color: Colors.white54, height: 1.3),
               ),
               const SizedBox(height: 8),
@@ -216,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           const PremiumCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 2.0.6 resolver-only'),
+              _PanelTitle(icon: Icons.info_outline_rounded, title: 'About', subtitle: 'Clipora 2.0.6+53 resolver-only'),
               SizedBox(height: 12),
               Text('Clipora is designed for media you own or are already authorized to view. It does not unlock private accounts or bypass access controls.', style: TextStyle(color: Colors.white70, height: 1.35)),
             ]),

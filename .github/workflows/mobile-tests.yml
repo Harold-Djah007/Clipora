@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+      - 'feature/**'
   workflow_dispatch:
 
 jobs:
@@ -30,4 +31,4 @@ jobs:
       - name: Run mobile tests
         run: flutter test
       - name: Build debug APK
-        run: flutter build apk --debug --no-pub
+        run: flutter build apk --debug --no-pub --dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010

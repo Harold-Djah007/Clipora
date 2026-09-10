@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.0.6+53 Keep video posts as video
+- Pinterest HLS pins rewrite to a public pinimg MP4 instead of silently saving the poster JPG.
+- Instagram reels no longer save the `og:image` PNG poster when yt-dlp reports an audience restriction; Clipora tries public embed/video URLs and fails instead of returning a thumbnail.
+- Facebook `l.php` share wrappers unwrap to the real post, so a successful save is not followed by a fake failure or a second copy of the same file.
+- Duplicate in-flight shares are ignored for a few seconds so Android does not save the same link twice.
+
+## 2.0.6+52 Public Threads share links
+- `/share/` links now follow the canonical public post instead of a login interstitial.
+- Threads extract misses are no longer labeled as a private/login-wall.
+- Clipora still does not collect Threads passwords or bypass private access.
+
+## 2.0.6+51 Public photo fallbacks for Pinterest, Instagram, X, and Facebook
+- Pinterest HLS pins now save the pin image when FFmpeg is missing instead of failing the download.
+- Instagram photo/reel pages scrape public `og:image` / carousel JSON when yt-dlp reports "no video formats".
+- X image tweets use a public syndication fallback when the tweet has photos but no video.
+- Facebook login-walled videos no longer dump cookie instructions; public embeds are still tried first.
+- Resolver errors never show yt-dlp GitHub issue URLs.
+
+## 2.0.6+50 Queue more links and harden every saver
+- Instagram, X, YouTube, Pinterest, Facebook, and Snapchat now use the same yt-dlp retry and file-tunnel fallback as TikTok.
+- Threads public pages expand share and `/t/` links, keep mixed photo/video carousels, pick the highest CDN variant, and ignore poster-only video pages.
+- Threads media is fetched on the resolver and tunneled through `/api/files` so the phone is not blocked by Instagram CDN 403s.
+- New shares and pastes queue while a save is already running instead of being ignored.
+
+## 2.0.6+49 Debug APK compile fix
+- Replaced the Kotlin `Notification.Builder.priority` field assignment that failed `flutter build apk` with `setPriority()`.
+
+## 2.0.6+48 Phone test cycle and out-of-app alerts
+- Locked the Windows test path to the PowerShell cycle: venv pip, `pytest -q`, `start_api.ps1`, health check, `adb reverse tcp:8010 tcp:8010`, `flutter test`, then a debug APK with `--dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010`.
+- Hardened TikTok short-link expansion and photo-carousel extraction through yt-dlp, without changing the Threads path.
+- Added high-importance success and error notifications so Clipora can finish after Share returns you to TikTok.
+
 ## 2.0.6 Seamless resolver hardening
 - Fixed Android build-time resolver injection in the active Gradle configuration.
 - Removed the obsolete WebView capture and misleading local Threads-session screens; every save now follows the resolver-only route.
