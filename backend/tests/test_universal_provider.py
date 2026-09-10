@@ -95,13 +95,13 @@ def test_resolve_caps_carousel_entries_at_twenty(monkeypatch):
     assert post.media[0].url.endswith("clip-0.mp4")
     assert post.media[-1].url.endswith("clip-19.mp4")
 
-def test_tiktok_uses_extractor_managed_browser_fingerprint():
+def test_tiktok_preserves_mobile_short_link_identity():
     provider = UniversalProvider()
 
     opts = provider._ydl_opts_for("https://vt.tiktok.com/example/")
     headers = opts["http_headers"]
 
-    assert "User-Agent" not in headers
-    assert "Referer" not in headers
+    assert "Android 13" in headers["User-Agent"]
+    assert headers["Referer"] == "https://www.tiktok.com/"
     assert headers["Accept-Language"] == "en-US,en;q=0.9"
 
