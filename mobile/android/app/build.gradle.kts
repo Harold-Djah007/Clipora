@@ -1,8 +1,31 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+fun decodeFlutterDartDefines(): Map<String, String> {
+    val raw = project.findProperty("dart-defines") as String? ?: return emptyMap()
+    return raw.split(',')
+        .filter { it.isNotBlank() }
+        .mapNotNull { encoded ->
+            runCatching { String(Base64.getDecoder().decode(encoded), Charsets.UTF_8) }.getOrNull()
+        }
+        .mapNotNull { decoded ->
+            val index = decoded.indexOf('=')
+            if (index <= 0) null else decoded.substring(0, index) to decoded.substring(index + 1)
+        }
+        .toMap()
+}
+
+fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+val flutterDartDefines = decodeFlutterDartDefines()
+val cliporaResolverUrl = (project.findProperty("CLIPORA_RESOLVER_URL") as String?)
+    ?: flutterDartDefines["CLIPORA_RESOLVER_URL"]
+    ?: ""
 
 android {
     namespace = "com.threadvault.threadvault"
@@ -12,6 +35,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     defaultConfig {
@@ -27,6 +54,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        buildConfigField("String", "CLIPORA_RESOLVER_URL", buildConfigString(cliporaResolverUrl))
     }
 
     buildTypes {
