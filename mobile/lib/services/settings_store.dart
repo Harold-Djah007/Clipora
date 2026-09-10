@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'resolver_url.dart';
+
 class AppSettings {
   final String filenameTemplate;
   final bool includeCaption;
@@ -16,7 +18,7 @@ class AppSettings {
     this.sessionTtlHours = 24,
     this.wifiOnly = false,
     this.maxConcurrentDownloads = 5,
-    this.resolverUrl = '',
+    this.resolverUrl = ResolverUrl.defaultValue,
   });
 
   AppSettings copyWith({
@@ -49,12 +51,9 @@ class SettingsStore {
       await p.setBool('clipora080TurboMigrated', true);
     }
 
-    // Older dev builds stored localhost as the default. That makes a sold/field
-    // app try to call a PC server that will not exist, so migrate that legacy
-    // default back to blank Field Mode. Custom LAN/cloud resolver URLs remain.
-    var resolverUrl = p.getString('resolverUrl') ?? '';
-    if (resolverUrl == 'http://127.0.0.1:8010') {
-      resolverUrl = '';
+    var resolverUrl = p.getString('resolverUrl') ?? ResolverUrl.defaultValue;
+    if (resolverUrl == 'http://127.0.0.1:8010' || resolverUrl.trim().isEmpty) {
+      resolverUrl = ResolverUrl.defaultValue;
       await p.setString('resolverUrl', resolverUrl);
     }
 
