@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -128,7 +129,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> with WidgetsBindingOb
       url: url,
       completer: Completer<String>(),
     );
-    request.timeout = Timer(const Duration(seconds: 36), () {
+    request.timeout = Timer(const Duration(seconds: 46), () {
       _completeCapture(
         request,
         error: StateError('Field capture timed out before the page exposed real media. Open the post once in Access, let it play, then retry.'),
@@ -560,18 +561,32 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         const type = (initiator || '').toLowerCase();
         if (!lower || lower.indexOf('http') !== 0) return null;
         if (type === 'video' || lower.includes('.mp4') || lower.includes('mime=video') || lower.includes('mime_type=video') || lower.includes('video/mp4') || lower.includes('video_mp4') || lower.includes('/video/')) return 'video';
-        if (type === 'img' || lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') || lower.includes('.webp')) return 'image';
+        if (type === 'img' || lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') || lower.includes('.webp') || lower.includes('mime=image') || lower.includes('image/jpeg') || lower.includes('image/webp')) return 'image';
         return null;
       }
-      document.querySelectorAll('video').forEach(function(v) {
+      function clickPlayable() {
         try {
-          v.muted = true;
-          v.setAttribute('muted', '');
-          v.setAttribute('playsinline', '');
-          v.playsInline = true;
-          const attempt = v.play();
-          if (attempt && attempt.catch) attempt.catch(function() {});
+          document.querySelectorAll('video').forEach(function(v) {
+            try {
+              v.muted = true;
+              v.setAttribute('muted', '');
+              v.setAttribute('playsinline', '');
+              v.playsInline = true;
+              const attempt = v.play();
+              if (attempt && attempt.catch) attempt.catch(function() {});
+            } catch (e) {}
+          });
+          document.querySelectorAll('button,[role="button"],a').forEach(function(el) {
+            try {
+              const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).toLowerCase();
+              if (label.includes('play') || label.includes('watch') || label.includes('view') || label.includes('open')) el.click();
+            } catch (e) {}
+          });
+          window.scrollBy(0, Math.max(120, Math.floor(window.innerHeight * 0.35)));
         } catch (e) {}
+      }
+      clickPlayable();
+      document.querySelectorAll('video').forEach(function(v) {
         const urls = [v.currentSrc, v.src, v.poster];
         v.querySelectorAll('source').forEach(function(s) { urls.push(s.src); });
         urls.forEach(function(u) {
@@ -584,6 +599,11 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         const u = img.currentSrc || img.src;
         if (u && img.naturalWidth > 240) push('image', u, img.naturalWidth, img.naturalHeight);
       });
+      document.querySelectorAll('source,a,meta[property="og:video"],meta[property="og:video:url"],meta[property="og:image"],meta[name="twitter:player:stream"],meta[name="twitter:image"]').forEach(function(el) {
+        const u = el.src || el.href || el.content || el.getAttribute('content') || '';
+        const kind = classifyResource(u, '');
+        if (kind) push(kind, u, null, null);
+      });
       try {
         performance.getEntriesByType('resource').forEach(function(entry) {
           const kind = classifyResource(entry.name || '', entry.initiatorType || '');
@@ -591,12 +611,16 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         });
       } catch (e) {}
       const canonical = document.querySelector('link[rel="canonical"]');
+      const videoCount = runtime.filter(function(x){ return x.kind === 'video'; }).length;
+      const imageCount = runtime.filter(function(x){ return x.kind === 'image'; }).length;
       return JSON.stringify({
         html: document.documentElement ? document.documentElement.outerHTML : '',
         pageUrl: location.href,
         canonicalUrl: canonical ? canonical.href : location.href,
         runtimeMedia: runtime,
-        hasVideo: runtime.some(function(x){ return x.kind === 'video'; }) || !!document.querySelector('video'),
+        videoCount: videoCount,
+        imageCount: imageCount,
+        hasVideo: videoCount > 0 || !!document.querySelector('video'),
         captureMode: 'field'
       });
     })();
@@ -605,7 +629,7 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
   @override
   void initState() {
     super.initState();
-    _timeout = Timer(const Duration(seconds: 34), () {
+    _timeout = Timer(const Duration(seconds: 44), () {
       if (_done) return;
       if (_lastSource != null && _lastSource!.isNotEmpty) {
         _finish(_lastSource!);
@@ -628,21 +652,78 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
       if (raw is! String || raw.isEmpty || raw == 'null') return;
       final source = raw.startsWith('"') ? _unquote(raw) : raw;
       _lastSource = source;
-      final ready = source.contains('.mp4') ||
-          source.contains('"kind":"video"') ||
-          source.contains('video_versions') ||
-          source.contains('playable_url') ||
-          source.contains('playback_url') ||
-          source.contains('mime=video') ||
-          source.contains('mime_type=video') ||
-          source.contains('video_mp4') ||
-          source.contains('/video/') ||
-          source.contains('cdninstagram') ||
-          source.contains('fbcdn');
+      final ready = _hasConfirmedRuntimeMedia(source);
       if (ready || finalAttempt) _finish(source);
     } catch (error) {
       if (finalAttempt) _fail(error);
     }
+  }
+
+  bool _hasConfirmedRuntimeMedia(String source) {
+    try {
+      final decoded = jsonDecode(source);
+      if (decoded is Map) {
+        final hasVideoElement = decoded['hasVideo'] == true;
+        final runtime = decoded['runtimeMedia'];
+        var videoCount = 0;
+        var imageCount = 0;
+        if (runtime is List) {
+          for (final item in runtime) {
+            if (item is! Map) continue;
+            final kind = '${item['kind'] ?? ''}'.toLowerCase();
+            final url = '${item['url'] ?? ''}';
+            if (kind == 'video' && _looksLikeRuntimeVideo(url)) {
+              videoCount++;
+            } else if (kind == 'image' && _looksLikeRuntimeImage(url)) {
+              imageCount++;
+            }
+          }
+        }
+        if (videoCount > 0) return true;
+        if (!hasVideoElement && imageCount > 0) return true;
+        return false;
+      }
+    } catch (_) {}
+
+    final lower = source.toLowerCase();
+    return lower.contains('.mp4') ||
+        lower.contains('"kind":"video"') ||
+        lower.contains('mime=video') ||
+        lower.contains('mime_type=video') ||
+        lower.contains('video/mp4') ||
+        lower.contains('video_mp4');
+  }
+
+  bool _looksLikeRuntimeVideo(String url) {
+    final lower = url.toLowerCase();
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+    final snapCandidate = host.endsWith('sc-cdn.net') &&
+        (lower.contains('/media/') || lower.contains('/video/') || lower.contains('video') || lower.contains('mime=video'));
+    return lower.startsWith('http') &&
+        !lower.contains('.m3u8') &&
+        !lower.contains('mpegurl') &&
+        !lower.contains('mime=audio') &&
+        (lower.contains('.mp4') ||
+            lower.contains('mime=video') ||
+            lower.contains('mime_type=video') ||
+            lower.contains('video/mp4') ||
+            lower.contains('video_mp4') ||
+            lower.contains('format=mp4') ||
+            snapCandidate);
+  }
+
+  bool _looksLikeRuntimeImage(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('http') &&
+        (lower.contains('.jpg') ||
+            lower.contains('.jpeg') ||
+            lower.contains('.png') ||
+            lower.contains('.webp') ||
+            lower.contains('mime=image') ||
+            lower.contains('image/jpeg') ||
+            lower.contains('image/webp') ||
+            lower.contains('image/png'));
   }
 
   void _finish(String source) {
@@ -682,9 +763,9 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         }
       },
       onLoadStop: (_, __) async {
-        for (var i = 0; i < 22 && !_done; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 550));
-          await _capture(finalAttempt: i == 21);
+        for (var i = 0; i < 36 && !_done; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 650));
+          await _capture(finalAttempt: i == 35);
         }
       },
     );
