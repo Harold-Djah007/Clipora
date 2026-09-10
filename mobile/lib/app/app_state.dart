@@ -7,14 +7,12 @@ import '../services/session_service.dart';
 import '../services/settings_store.dart';
 import '../services/platform_services.dart';
 import '../services/threads_parser.dart';
-import '../services/universal_capture_parser.dart';
 import '../services/universal_platform_detector.dart';
 import '../services/universal_resolver_service.dart';
 
 class AppState extends ChangeNotifier {
   Timer? _sessionTimer;
   final parser = ThreadsParser();
-  final captureParser = UniversalCaptureParser();
   final historyStore = HistoryStore();
   final sessionService = SessionService();
   late final DownloadManager downloadManager = DownloadManager(historyStore);
@@ -76,11 +74,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Clipora 2.0 first stage: inspect links and return a picker-ready media plan.
+  /// Builds a media plan from pasted links.
   ///
-  /// This is deliberately separated from saving so the UX no longer feels like the
-  /// old one-button flow. Threads still routes through the existing local parser;
-  /// non-Threads uses the optional resolver first, then Field Mode capture.
+  /// Threads is the only platform that is allowed to use Clipora's existing
+  /// local capture path. Every other platform must resolve through the
+  /// yt-dlp-style backend resolver, so the app no longer opens/captures social
+  /// pages for TikTok, Instagram, X, Pinterest, Facebook, Snapchat, or YouTube.
   Future<List<ResolvedPost>> scanForMedia(
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
@@ -91,7 +90,7 @@ class AppState extends ChangeNotifier {
     busy = activeJobs > 0;
     lastRunHadErrors = false;
     lastRunSaved = 0;
-    status = 'Analyzing ${urls.length} link${urls.length == 1 ? '' : 's'}…';
+    status = 'Preparing ${urls.length} link${urls.length == 1 ? '' : 's'}…';
     notifyListeners();
 
     final posts = <ResolvedPost>[];
@@ -101,33 +100,33 @@ class AppState extends ChangeNotifier {
       for (var i = 0; i < urls.length; i++) {
         final url = urls[i];
         final platform = UniversalPlatformDetector.detect(url);
-        status = 'Scanning ${platform.label} ${i + 1}/${urls.length}…';
+        status = 'Resolving ${platform.label} ${i + 1}/${urls.length}…';
         notifyListeners();
 
         try {
           if (!platform.isSupported) {
             throw StateError('Unsupported link. Clipora supports ${UniversalPlatformDetector.supportedLabel}.');
           }
-          debugPrint('[Clipora] 2.0 analyze ${platform.label}: $url');
+          debugPrint('[Clipora] instant resolve ${platform.label}: $url');
           final post = await _resolvePost(url, platform, sourceLoader);
-          debugPrint('[Clipora] 2.0 picker found ${post.media.length} media item(s) for ${post.postId} via ${platform.label}');
+          debugPrint('[Clipora] instant resolver found ${post.media.length} media item(s) for ${post.postId} via ${platform.label}');
           posts.add(post);
         } catch (e, st) {
-          debugPrint('[Clipora] 2.0 scan failed: $e\n$st');
+          debugPrint('[Clipora] instant resolve failed: $e\n$st');
           errors.add(_friendlyError(e));
         }
       }
 
       lastRunHadErrors = errors.isNotEmpty;
       if (posts.isEmpty) {
-        status = 'Scan failed: ${errors.isEmpty ? 'No media was found.' : errors.first}';
+        status = 'Download failed: ${errors.isEmpty ? 'No media was found.' : errors.first}';
         throw StateError(status!);
       }
 
       final totalMedia = posts.fold<int>(0, (sum, post) => sum + post.media.length);
       status = errors.isEmpty
-          ? 'Ready: found $totalMedia media item${totalMedia == 1 ? '' : 's'}.'
-          : 'Ready: found $totalMedia item${totalMedia == 1 ? '' : 's'}; ${errors.length} link${errors.length == 1 ? '' : 's'} failed.';
+          ? 'Found $totalMedia media item${totalMedia == 1 ? '' : 's'}. Saving now…'
+          : 'Found $totalMedia item${totalMedia == 1 ? '' : 's'}; ${errors.length} link${errors.length == 1 ? '' : 's'} failed. Saving what worked…';
       return posts;
     } finally {
       activeJobs = activeJobs > 0 ? activeJobs - 1 : 0;
@@ -136,7 +135,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Clipora 2.0 second stage: save the picker-selected media plan.
   Future<bool> saveResolvedMedia(List<ResolvedPost> posts) async {
     final filtered = posts.where((post) => post.media.isNotEmpty).toList(growable: false);
     if (filtered.isEmpty) return false;
@@ -145,7 +143,7 @@ class AppState extends ChangeNotifier {
     busy = activeJobs > 0;
     lastRunHadErrors = false;
     lastRunSaved = 0;
-    status = 'Saving selected media…';
+    status = 'Saving media…';
     await PlatformServices.startDownloadService(message: status!);
     notifyListeners();
 
@@ -166,7 +164,7 @@ class AppState extends ChangeNotifier {
             post,
             settings,
             onProgress: (completed, total) {
-              status = 'Saving $completed of $total selected ${platform.label} item${total == 1 ? '' : 's'}…';
+              status = 'Saving $completed of $total ${platform.label} item${total == 1 ? '' : 's'}…';
               unawaited(PlatformServices.updateDownloadService(message: status!));
               notifyListeners();
             },
@@ -180,7 +178,7 @@ class AppState extends ChangeNotifier {
             errors.addAll(postFailures.map((record) => record.error ?? 'Unknown download error'));
           }
         } catch (e, st) {
-          debugPrint('[Clipora] 2.0 save failed: $e\n$st');
+          debugPrint('[Clipora] instant save failed: $e\n$st');
           failed++;
           errors.add(_friendlyError(e));
         }
@@ -195,7 +193,7 @@ class AppState extends ChangeNotifier {
       } else if (saved > 0) {
         status = 'Saved $saved; $failed failed. ${errors.first}';
       } else {
-        status = 'Save failed: ${errors.isEmpty ? 'No selected media could be saved.' : errors.first}';
+        status = 'Save failed: ${errors.isEmpty ? 'No media could be saved.' : errors.first}';
       }
 
       await PlatformServices.showDownloadComplete(
@@ -216,8 +214,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Compatibility wrapper for older screens/tests. New Clipora 2.0 UI uses
-  /// scanForMedia() and saveResolvedMedia() as two separate steps.
   Future<bool> resolveAndDownload(
     List<String> urls, {
     required Future<String> Function(String url) sourceLoader,
@@ -232,43 +228,36 @@ class AppState extends ChangeNotifier {
     Future<String> Function(String url) sourceLoader,
   ) async {
     if (platform.isThreads) {
-      return _resolveWithCapture(url, platform, sourceLoader, reason: 'Capturing Threads media quietly on this phone…');
+      return _resolveThreadsWithCapture(url, platform, sourceLoader);
     }
 
-    if (universalResolver.hasConfiguredBackend) {
-      try {
-        status = 'Resolver Boost: extracting ${platform.label} media…';
-        await PlatformServices.updateDownloadService(message: status!);
-        notifyListeners();
-        return await universalResolver.resolve(url);
-      } catch (error) {
-        debugPrint('[Clipora] optional backend unavailable for ${platform.label}, using phone capture: $error');
-      }
+    if (!universalResolver.hasConfiguredBackend) {
+      throw StateError(
+        'A hosted Clipora resolver is required for ${platform.label}. Non-Threads no longer use the old phone WebView capture path, so Snapchat/TikTok/Instagram/X/Facebook/Pinterest/YouTube can run like Pinget: paste link, backend resolves, APK saves automatically.',
+      );
     }
 
-    return _resolveWithCapture(
-      url,
-      platform,
-      sourceLoader,
-      reason: 'Field Mode: capturing ${platform.label} media on this phone…',
-    );
+    try {
+      status = 'Resolver Boost: extracting ${platform.label} media…';
+      await PlatformServices.updateDownloadService(message: status!);
+      notifyListeners();
+      return await universalResolver.resolve(url);
+    } catch (error) {
+      throw StateError('Resolver failed for ${platform.label}: ${_friendlyError(error)}');
+    }
   }
 
-  Future<ResolvedPost> _resolveWithCapture(
+  Future<ResolvedPost> _resolveThreadsWithCapture(
     String url,
     PlatformMatch platform,
-    Future<String> Function(String url) sourceLoader, {
-    required String reason,
-  }) async {
-    status = reason;
+    Future<String> Function(String url) sourceLoader,
+  ) async {
+    status = 'Capturing Threads media quietly on this phone…';
     notifyListeners();
 
     final source = await sourceLoader(url);
-    debugPrint('[Clipora] ${platform.label} field capture source bytes=${source.length}');
-    if (platform.isThreads) {
-      return parser.parse(source, url);
-    }
-    return captureParser.parse(source, url, platform);
+    debugPrint('[Clipora] Threads field capture source bytes=${source.length}');
+    return parser.parse(source, url);
   }
 
   String _friendlyError(Object error) => error
