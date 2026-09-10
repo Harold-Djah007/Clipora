@@ -67,6 +67,12 @@ class PlatformServices {
     } catch (_) {}
   }
 
+  static Future<void> returnToSourceApp() async {
+    try {
+      await _channel.invokeMethod<void>('returnToSourceApp');
+    } catch (_) {}
+  }
+
   static Future<String?> takeSharedUrl() async {
     try {
       final value = await _channel.invokeMethod<String>('takeSharedUrl');
