@@ -20,8 +20,6 @@ fun decodeFlutterDartDefines(): Map<String, String> {
         .toMap()
 }
 
-fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-
 val flutterDartDefines = decodeFlutterDartDefines()
 val cliporaResolverUrl = (project.findProperty("CLIPORA_RESOLVER_URL") as String?)
     ?: flutterDartDefines["CLIPORA_RESOLVER_URL"]
