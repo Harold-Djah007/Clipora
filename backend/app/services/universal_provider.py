@@ -130,12 +130,10 @@ class UniversalProvider:
 
             if video_like:
                 try:
-                    # This is how the strongest saver apps avoid mobile 403/HLS issues:
-                    # resolve/download server-side, then let the phone fetch a local
-                    # Clipora cache URL. The phone still validates the saved bytes.
+                    # This avoids mobile 403/HLS issues by letting the backend fetch
+                    # the file and exposing it to the phone as /api/files/{token}.
                     entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
                 except Exception:
-                    # Fall back to direct URLs only when the extractor found a real video.
                     if not entry_media:
                         raise
 
@@ -172,11 +170,6 @@ class UniversalProvider:
         except Exception as exc:
             if not self._should_retry_without_format(exc):
                 raise
-
-            # Some platforms expose photo/story metadata but fail when the MP4-only
-            # format expression is applied. Retry metadata extraction without a
-            # requested format so Pinterest photos, X image posts, and Snapchat story
-            # playlists can still be inspected safely.
             fallback_opts = dict(opts)
             fallback_opts.pop("format", None)
             fallback_opts["skip_download"] = True
@@ -210,20 +203,17 @@ class UniversalProvider:
         text = str(error).lower()
         return (
             "requested format is not available" in text
+            or "requested format not available" in text
             or "no video could be found" in text
             or "no video formats found" in text
-            or "requested format not available" in text
         )
 
     def _entry_infos(self, info: dict[str, Any]) -> list[dict[str, Any]]:
         raw_entries = info.get("entries")
         if not isinstance(raw_entries, list) or not raw_entries:
             return [info]
-
         entries = [entry for entry in raw_entries if isinstance(entry, dict)]
-        if not entries:
-            return [info]
-        return entries
+        return entries or [info]
 
     @staticmethod
     def _entry_url(entry: dict[str, Any], fallback: str) -> str:
@@ -260,19 +250,26 @@ class UniversalProvider:
                 "mime_type": info.get("mime_type") or info.get("mimetype"),
             }
         )
-        direct_image = self._media_from_url(str(direct_url or ""), key_hint="url image_url", width=info.get("width"), height=info.get("height"))
+        direct_image = self._media_from_url(
+            str(direct_url or ""),
+            key_hint="url image_url",
+            width=info.get("width"),
+            height=info.get("height"),
+        )
 
         formats = self._formats(info)
         format_candidates = [item for item in (self._media_from_format(fmt) for fmt in formats) if item]
         format_candidates.sort(key=self._media_rank, reverse=True)
 
-        nested = list(self._deep_media_candidates(info))
-        video_candidates = []
+        scan_source = {key: value for key, value in info.items() if key not in {"formats", "thumbnails"}}
+        nested = list(self._deep_media_candidates(scan_source))
+
+        video_candidates: list[UniversalMedia] = []
         if direct_video:
             video_candidates.append(direct_video)
         if format_candidates:
             # Formats are normally quality variants for one video, so keep the best
-            # format and let carousel/story entries supply additional clips.
+            # one. Carousels/stories should arrive as entries or nested media URLs.
             video_candidates.append(format_candidates[0])
         video_candidates.extend(item for item in nested if item.media_type == "video")
         video_candidates = self._dedupe_media(video_candidates)
@@ -280,28 +277,34 @@ class UniversalProvider:
             video_candidates.sort(key=self._media_rank, reverse=True)
             return video_candidates[: self._MAX_PLAYLIST_MEDIA]
 
-        # If yt-dlp found HLS/DASH/video-only metadata, do not return a poster JPG.
-        # The file-fallback path downloads a real video instead of saving thumbnail.
         if self._has_video_like_format(info, formats):
             return []
 
-        image_candidates = []
+        image_candidates: list[UniversalMedia] = []
         if direct_image and direct_image.media_type == "image":
             image_candidates.append(direct_image)
         image_candidates.extend(item for item in nested if item.media_type == "image")
+        image_candidates = self._dedupe_media(image_candidates)
+        if image_candidates:
+            image_candidates.sort(key=self._media_rank, reverse=True)
+            return image_candidates[: self._MAX_PLAYLIST_MEDIA]
 
         thumbnails = [thumb for thumb in info.get("thumbnails") or [] if isinstance(thumb, dict)]
         for thumb in thumbnails:
             thumb_url = thumb.get("url")
             if not isinstance(thumb_url, str):
                 continue
-            image = self._media_from_url(thumb_url, key_hint="thumbnail image", width=thumb.get("width"), height=thumb.get("height"))
+            image = self._media_from_url(
+                thumb_url,
+                key_hint="thumbnail image",
+                width=thumb.get("width"),
+                height=thumb.get("height"),
+            )
             if image and image.media_type == "image":
                 image_candidates.append(image)
-
         image_candidates = self._dedupe_media(image_candidates)
         image_candidates.sort(key=self._media_rank, reverse=True)
-        return image_candidates[: self._MAX_PLAYLIST_MEDIA]
+        return image_candidates[:1]
 
     @staticmethod
     def _formats(info: dict[str, Any]) -> list[dict[str, Any]]:
@@ -421,8 +424,6 @@ class UniversalProvider:
         acodec = str(fmt.get("acodec") or "").lower()
         mime_type = str(fmt.get("mime_type") or fmt.get("mimetype") or "").lower()
 
-        # Direct mobile downloads still prefer real files. HLS manifests are
-        # skipped here and handled by the file-fallback downloader instead.
         if "m3u8" in protocol or url.endswith(".m3u8"):
             return None
         if vcodec == "none" and acodec != "none":
@@ -483,7 +484,7 @@ class UniversalProvider:
 
     def _media_from_text(self, text: str, key_hint: str = "") -> list[UniversalMedia]:
         text = self._decode_url_text(text)
-        urls = re.findall(r"https?:\\?/\\?/[^\"'<>\\s]+", text)
+        urls = re.findall(r"https?:\\?/\\?/[^\"'<>\s]+", text)
         return [item for raw in urls if (item := self._media_from_url(raw, key_hint=key_hint))]
 
     def _media_from_url(self, raw_url: str, key_hint: str = "", width: Any = None, height: Any = None) -> Optional[UniversalMedia]:
@@ -581,6 +582,7 @@ class UniversalProvider:
                 or "image/webp" in lower
                 or "image/png" in lower
                 or "image_url" in hint
+                or "display_url" in hint
                 or "thumbnail" in hint
                 or "og:image" in hint
             )
