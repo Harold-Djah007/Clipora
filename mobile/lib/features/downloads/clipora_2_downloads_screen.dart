@@ -23,20 +23,20 @@ class Clipora2DownloadsScreen extends StatefulWidget {
 
 class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with WidgetsBindingObserver {
   final controller = TextEditingController();
+  final scrollController = ScrollController();
   final List<_CaptureRequest> _captureQueue = [];
-  final ScrollController _scrollController = ScrollController();
-
-  String? clipboardUrl;
-  String? _error;
-  String? _lastAutoStartedFingerprint;
-  _CaptureRequest? _activeCapture;
-  _InstantStage _stage = _InstantStage.idle;
-  int _captureSeq = 0;
-  bool _showDone = false;
-  Timer? _doneTimer;
-  Timer? _autoTimer;
 
   static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
+
+  String? clipboardUrl;
+  String? errorText;
+  String? lastAutoFingerprint;
+  _CaptureRequest? activeCapture;
+  _InstantStage stage = _InstantStage.idle;
+  Timer? autoTimer;
+  Timer? doneTimer;
+  bool showDone = false;
+  int captureSeq = 0;
 
   @override
   void initState() {
@@ -51,10 +51,10 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _autoTimer?.cancel();
-    _doneTimer?.cancel();
-    _scrollController.dispose();
-    final pending = [if (_activeCapture != null) _activeCapture!, ..._captureQueue];
+    autoTimer?.cancel();
+    doneTimer?.cancel();
+    scrollController.dispose();
+    final pending = [if (activeCapture != null) activeCapture!, ..._captureQueue];
     for (final request in pending) {
       request.timeout?.cancel();
       if (!request.completer.isCompleted) {
@@ -83,7 +83,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     return urls.take(20).toList(growable: false);
   }
 
-  String _fingerprint(List<String> urls) => urls.map((url) => url.trim()).where((url) => url.isNotEmpty).join('\n');
+  String _fingerprint(List<String> urls) => urls.map((url) => url.trim()).join('\n');
 
   Future<void> _readSharedUrl({required bool autoStart}) async {
     final shared = await PlatformServices.takeSharedUrl();
@@ -93,8 +93,8 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     setState(() {
       controller.text = urls.join('\n');
       clipboardUrl = urls.first;
-      _error = null;
-      _stage = _InstantStage.idle;
+      errorText = null;
+      stage = _InstantStage.idle;
     });
     if (autoStart) _scheduleInstantDownload();
   }
@@ -107,8 +107,8 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       clipboardUrl = urls.isEmpty ? null : urls.first;
       if (controller.text.trim().isEmpty && urls.isNotEmpty) {
         controller.text = urls.join('\n');
-        _error = null;
-        _stage = _InstantStage.idle;
+        errorText = null;
+        stage = _InstantStage.idle;
       }
     });
     if (autoStart && urls.isNotEmpty && controller.text.contains(urls.first)) {
@@ -118,45 +118,42 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
 
   void _onInputChanged() {
     setState(() {
-      _error = null;
-      _stage = _extractUrls(controller.text).isEmpty ? _InstantStage.idle : _stage;
+      errorText = null;
+      if (_extractUrls(controller.text).isEmpty) stage = _InstantStage.idle;
     });
     _scheduleInstantDownload();
   }
 
   void _scheduleInstantDownload() {
-    _autoTimer?.cancel();
+    autoTimer?.cancel();
     final urls = _extractUrls(controller.text);
     if (urls.isEmpty || context.read<AppState>().busy) return;
-    _autoTimer = Timer(const Duration(milliseconds: 650), () {
-      if (mounted) unawaited(_startInstantDownload());
+    autoTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) unawaited(_downloadNow());
     });
   }
 
-  Future<void> _startInstantDownload({bool force = false}) async {
+  Future<void> _downloadNow({bool force = false}) async {
     final submitted = controller.text;
     final urls = _extractUrls(submitted);
     if (urls.isEmpty) {
-      _showSnack('Paste or share a supported social link first.');
+      _snack('Paste or share a supported social link first.');
       return;
     }
 
     final fingerprint = _fingerprint(urls);
-    if (!force && _lastAutoStartedFingerprint == fingerprint) return;
+    if (!force && lastAutoFingerprint == fingerprint) return;
+    lastAutoFingerprint = fingerprint;
+    autoTimer?.cancel();
 
-    _autoTimer?.cancel();
-    _lastAutoStartedFingerprint = fingerprint;
     HapticFeedback.mediumImpact();
     setState(() {
-      _stage = _InstantStage.saving;
-      _error = null;
+      stage = _InstantStage.saving;
+      errorText = null;
     });
 
     try {
-      final ok = await context.read<AppState>().resolveAndDownload(
-        urls,
-        sourceLoader: _captureInBackground,
-      );
+      final ok = await context.read<AppState>().resolveAndDownload(urls, sourceLoader: _captureInBackground);
       if (!mounted) return;
       if (ok) {
         setState(() {
@@ -164,28 +161,28 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
             controller.clear();
             clipboardUrl = null;
           }
-          _stage = _InstantStage.done;
-          _error = null;
-          _lastAutoStartedFingerprint = null;
+          stage = _InstantStage.done;
+          errorText = null;
+          lastAutoFingerprint = null;
         });
         _flashDone();
       } else {
         setState(() {
-          _stage = _InstantStage.error;
-          _error = context.read<AppState>().status ?? 'Clipora could not save media from this link.';
+          stage = _InstantStage.error;
+          errorText = context.read<AppState>().status ?? 'Clipora could not save media from this link.';
         });
       }
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _stage = _InstantStage.error;
-        _error = _cleanError(error);
+        stage = _InstantStage.error;
+        errorText = _cleanError(error);
       });
     }
   }
 
   Future<String> _captureInBackground(String url) {
-    final request = _CaptureRequest(id: _captureSeq++, url: url, completer: Completer<String>());
+    final request = _CaptureRequest(id: captureSeq++, url: url, completer: Completer<String>());
     request.timeout = Timer(const Duration(seconds: 46), () {
       _completeCapture(
         request,
@@ -198,14 +195,14 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
   }
 
   void _pumpCaptureQueue() {
-    if (!mounted || _activeCapture != null || _captureQueue.isEmpty) return;
-    setState(() => _activeCapture = _captureQueue.removeAt(0));
+    if (!mounted || activeCapture != null || _captureQueue.isEmpty) return;
+    setState(() => activeCapture = _captureQueue.removeAt(0));
   }
 
   void _completeCapture(_CaptureRequest request, {String? source, Object? error}) {
     request.timeout?.cancel();
     _captureQueue.remove(request);
-    if (_activeCapture != request) return;
+    if (activeCapture != request) return;
     if (!request.completer.isCompleted) {
       if (source != null && source.isNotEmpty) {
         request.completer.complete(source);
@@ -214,27 +211,25 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
       }
     }
     if (!mounted) return;
-    setState(() => _activeCapture = null);
+    setState(() => activeCapture = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => _pumpCaptureQueue());
   }
 
   void _completeActiveCapture({String? source, Object? error}) {
-    final active = _activeCapture;
-    if (active == null) return;
-    _completeCapture(active, source: source, error: error);
+    final request = activeCapture;
+    if (request == null) return;
+    _completeCapture(request, source: source, error: error);
   }
 
   void _flashDone() {
-    _doneTimer?.cancel();
-    setState(() => _showDone = true);
-    _doneTimer = Timer(const Duration(milliseconds: 1450), () {
-      if (mounted) setState(() => _showDone = false);
+    doneTimer?.cancel();
+    setState(() => showDone = true);
+    doneTimer = Timer(const Duration(milliseconds: 1450), () {
+      if (mounted) setState(() => showDone = false);
     });
   }
 
-  void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
+  void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
   String _cleanError(Object error) => error
       .toString()
@@ -249,107 +244,103 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     final matches = UniversalPlatformDetector.detectAll(urls);
     final hasBackend = app.universalResolver.hasConfiguredBackend;
     final recent = app.history.take(5).toList();
-    final busy = app.busy || _stage == _InstantStage.saving;
+    final busy = app.busy || stage == _InstantStage.saving;
 
     return CliporaPage(
       padding: EdgeInsets.zero,
-      child: Stack(
-        children: [
-          const Positioned.fill(child: _InstantBackground()),
-          Positioned.fill(
-            child: ListView(
-              controller: _scrollController,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 118),
-              children: [
-                _InstantHeader(hasBackend: hasBackend),
+      child: Stack(children: [
+        const Positioned.fill(child: _InstantBackground()),
+        Positioned.fill(
+          child: ListView(
+            controller: scrollController,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 118),
+            children: [
+              _Header(hasBackend: hasBackend),
+              const SizedBox(height: 18),
+              _PastePanel(
+                controller: controller,
+                urlCount: urls.length,
+                matches: matches,
+                hasBackend: hasBackend,
+                busy: busy,
+                clipboardUrl: clipboardUrl,
+                onChanged: _onInputChanged,
+                onPaste: () async {
+                  await _readClipboard(autoStart: true);
+                  if (_extractUrls(controller.text).isNotEmpty) _scheduleInstantDownload();
+                },
+                onClear: () {
+                  autoTimer?.cancel();
+                  setState(() {
+                    controller.clear();
+                    errorText = null;
+                    lastAutoFingerprint = null;
+                    stage = _InstantStage.idle;
+                  });
+                },
+                onDownload: busy ? null : () => _downloadNow(force: true),
+              ),
+              const SizedBox(height: 14),
+              _StatusPanel(stage: stage, status: app.status, busy: busy, error: errorText),
+              const SizedBox(height: 14),
+              _RoutePanel(hasBackend: hasBackend, captureActive: activeCapture != null),
+              if (recent.isNotEmpty) ...[
                 const SizedBox(height: 18),
-                _InstantHero(
-                  controller: controller,
-                  urlCount: urls.length,
-                  matches: matches,
-                  hasBackend: hasBackend,
-                  busy: busy,
-                  clipboardUrl: clipboardUrl,
-                  onChanged: _onInputChanged,
-                  onPaste: () async {
-                    await _readClipboard(autoStart: true);
-                    if (_extractUrls(controller.text).isNotEmpty) _scheduleInstantDownload();
-                  },
-                  onClear: () {
-                    _autoTimer?.cancel();
-                    setState(() {
-                      controller.clear();
-                      _error = null;
-                      _lastAutoStartedFingerprint = null;
-                      _stage = _InstantStage.idle;
-                    });
-                  },
-                  onDownload: busy ? null : () => _startInstantDownload(force: true),
-                ),
-                const SizedBox(height: 14),
-                _LiveInstantPanel(stage: _stage, status: app.status, busy: busy, error: _error),
-                const SizedBox(height: 14),
-                _RouteStrip(hasBackend: hasBackend, hasCapture: _activeCapture != null),
-                if (recent.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  _RecentDownloads(recent: recent),
-                ],
-                const SizedBox(height: 18),
-                const _BoundaryNote(),
+                _RecentPanel(recent: recent),
               ],
-            ),
+              const SizedBox(height: 18),
+              const _BoundaryNote(),
+            ],
           ),
-          if (_activeCapture != null)
-            Positioned(
-              left: 0,
-              top: 0,
-              width: MediaQuery.sizeOf(context).width,
-              height: MediaQuery.sizeOf(context).height * .78,
-              child: Opacity(
-                opacity: 0.01,
-                child: IgnorePointer(
-                  child: _HiddenCaptureHost(
-                    key: ValueKey(_activeCapture!.id),
-                    url: _activeCapture!.url,
-                    onComplete: (source) => _completeActiveCapture(source: source),
-                    onFailed: (error) => _completeActiveCapture(error: error),
-                  ),
+        ),
+        if (activeCapture != null)
+          Positioned(
+            left: 0,
+            top: 0,
+            width: MediaQuery.sizeOf(context).width,
+            height: MediaQuery.sizeOf(context).height * .78,
+            child: Opacity(
+              opacity: 0.01,
+              child: IgnorePointer(
+                child: _HiddenCaptureHost(
+                  key: ValueKey(activeCapture!.id),
+                  url: activeCapture!.url,
+                  onComplete: (source) => _completeActiveCapture(source: source),
+                  onFailed: (error) => _completeActiveCapture(error: error),
                 ),
               ),
             ),
-          if (_showDone) const Positioned.fill(child: IgnorePointer(child: _DoneOverlay())),
-        ],
-      ),
+          ),
+        if (showDone) const Positioned.fill(child: IgnorePointer(child: _DoneOverlay())),
+      ]),
     );
   }
 }
 
-class _InstantHeader extends StatelessWidget {
-  const _InstantHeader({required this.hasBackend});
+class _Header extends StatelessWidget {
+  const _Header({required this.hasBackend});
   final bool hasBackend;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const ThreadVaultMark(size: 42, showGlow: false),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Clipora Instant', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
-            SizedBox(height: 3),
-            Text('Paste. Auto-download. Done.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
-          ]),
-        ),
-        _ModeBadge(hasBackend: hasBackend),
-      ],
-    );
+    return Row(children: [
+      const ThreadVaultMark(size: 42, showGlow: false),
+      const SizedBox(width: 12),
+      const Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Clipora Instant', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1)),
+          SizedBox(height: 3),
+          Text('Paste. Auto-download. Done.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
+        ]),
+      ),
+      _ModeBadge(hasBackend: hasBackend),
+    ]);
   }
 }
 
-class _InstantHero extends StatelessWidget {
-  const _InstantHero({
+class _PastePanel extends StatelessWidget {
+  const _PastePanel({
     required this.controller,
     required this.urlCount,
     required this.matches,
@@ -376,7 +367,6 @@ class _InstantHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _GlassPanel(
-      padding: const EdgeInsets.all(20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
@@ -385,8 +375,8 @@ class _InstantHero extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 hasBackend
-                    ? 'Clipora starts the resolver route immediately and saves every real media item it finds.'
-                    : 'Clipora starts Field Mode immediately. Add a hosted resolver later for the hardest services.',
+                    ? 'Resolver Boost starts immediately and saves every real media item.'
+                    : 'Field Mode starts immediately on this phone. Add a hosted resolver later for the hardest services.',
                 style: const TextStyle(color: Colors.white60, height: 1.35, fontSize: 13.2),
               ),
             ]),
@@ -415,33 +405,41 @@ class _InstantHero extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: matches.map((match) => CliporaPill(icon: match.icon, label: match.label, value: hasBackend && !match.isThreads ? 'resolver' : 'field', color: match.accent)).toList(growable: false),
+            children: matches
+                .map((match) => CliporaPill(
+                      icon: match.icon,
+                      label: match.label,
+                      value: hasBackend && !match.isThreads ? 'resolver' : 'field',
+                      color: match.accent,
+                    ))
+                .toList(growable: false),
           ),
         ],
         const SizedBox(height: 16),
-        _PrimaryAction(
-          icon: busy ? Icons.downloading_rounded : Icons.bolt_rounded,
-          label: busy
-              ? 'Downloading now…'
-              : urlCount > 1
-                  ? 'Download $urlCount links now'
-                  : 'Download now',
-          onPressed: onDownload,
+        SizedBox(
+          width: double.infinity,
+          height: 58,
+          child: FilledButton.icon(
+            onPressed: onDownload,
+            icon: Icon(busy ? Icons.downloading_rounded : Icons.bolt_rounded),
+            label: Text(busy
+                ? 'Downloading now…'
+                : urlCount > 1
+                    ? 'Download $urlCount links now'
+                    : 'Download now'),
+          ),
         ),
         if (clipboardUrl != null && !controller.text.contains(clipboardUrl!)) ...[
           const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(onPressed: busy ? null : onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Paste clipboard and download')),
-          ),
+          TextButton.icon(onPressed: busy ? null : onPaste, icon: const Icon(Icons.content_paste_rounded, size: 18), label: const Text('Paste clipboard and download')),
         ],
       ]),
     );
   }
 }
 
-class _LiveInstantPanel extends StatelessWidget {
-  const _LiveInstantPanel({required this.stage, required this.status, required this.busy, required this.error});
+class _StatusPanel extends StatelessWidget {
+  const _StatusPanel({required this.stage, required this.status, required this.busy, required this.error});
   final _InstantStage stage;
   final String? status;
   final bool busy;
@@ -453,14 +451,14 @@ class _LiveInstantPanel extends StatelessWidget {
     final done = stage == _InstantStage.done;
     final color = failed ? const Color(0xFFFCA5A5) : done ? const Color(0xFF86EFAC) : const Color(0xFF67E8F9);
     final icon = failed ? Icons.error_outline_rounded : done ? Icons.check_circle_rounded : busy ? Icons.downloading_rounded : Icons.touch_app_rounded;
-    final message = error ?? status ?? 'Ready. Paste a link and Clipora will start automatically.';
+    final message = error ?? status ?? 'Ready. Paste a link and Clipora starts automatically.';
     return _GlassPanel(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(icon, color: color),
           const SizedBox(width: 10),
-          Expanded(child: Text(message, style: const TextStyle(color: Colors.white70, height: 1.35, fontWeight: FontWeight.w750))),
+          Expanded(child: Text(message, style: const TextStyle(color: Colors.white70, height: 1.35, fontWeight: FontWeight.w700))),
         ]),
         if (busy) ...[
           const SizedBox(height: 12),
@@ -473,28 +471,28 @@ class _LiveInstantPanel extends StatelessWidget {
   }
 }
 
-class _RouteStrip extends StatelessWidget {
-  const _RouteStrip({required this.hasBackend, required this.hasCapture});
+class _RoutePanel extends StatelessWidget {
+  const _RoutePanel({required this.hasBackend, required this.captureActive});
   final bool hasBackend;
-  final bool hasCapture;
+  final bool captureActive;
 
   @override
   Widget build(BuildContext context) {
     return _GlassPanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       child: Row(children: [
-        Expanded(child: _TinyRoute(icon: Icons.travel_explore_rounded, title: 'Detect', body: 'auto')),
-        const _Arrow(),
-        Expanded(child: _TinyRoute(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.phone_android_rounded, title: hasBackend ? 'Resolve' : 'Capture', body: hasCapture ? 'hidden' : (hasBackend ? 'boost' : 'field'))),
-        const _Arrow(),
-        Expanded(child: _TinyRoute(icon: Icons.download_done_rounded, title: 'Save', body: 'gallery')),
+        const Expanded(child: _RouteStep(icon: Icons.travel_explore_rounded, title: 'Detect', body: 'auto')),
+        const Icon(Icons.chevron_right_rounded, color: Colors.white24),
+        Expanded(child: _RouteStep(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.phone_android_rounded, title: hasBackend ? 'Resolve' : 'Capture', body: captureActive ? 'hidden' : (hasBackend ? 'boost' : 'field'))),
+        const Icon(Icons.chevron_right_rounded, color: Colors.white24),
+        const Expanded(child: _RouteStep(icon: Icons.download_done_rounded, title: 'Save', body: 'gallery')),
       ]),
     );
   }
 }
 
-class _TinyRoute extends StatelessWidget {
-  const _TinyRoute({required this.icon, required this.title, required this.body});
+class _RouteStep extends StatelessWidget {
+  const _RouteStep({required this.icon, required this.title, required this.body});
   final IconData icon;
   final String title;
   final String body;
@@ -511,15 +509,8 @@ class _TinyRoute extends StatelessWidget {
   }
 }
 
-class _Arrow extends StatelessWidget {
-  const _Arrow();
-
-  @override
-  Widget build(BuildContext context) => const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 24);
-}
-
-class _RecentDownloads extends StatelessWidget {
-  const _RecentDownloads({required this.recent});
+class _RecentPanel extends StatelessWidget {
+  const _RecentPanel({required this.recent});
   final List<DownloadRecord> recent;
 
   @override
@@ -597,7 +588,6 @@ class _MetricTile extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(colors: [Color(0xFF00F2EA), Color(0xFF60A5FA)]),
-        boxShadow: [BoxShadow(color: const Color(0xFF00F2EA).withOpacity(.18), blurRadius: 26, offset: const Offset(0, 12))],
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF06111C), fontWeight: FontWeight.w900, fontSize: 16)),
@@ -607,36 +597,8 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-class _PrimaryAction extends StatelessWidget {
-  const _PrimaryAction({required this.icon, required this.label, required this.onPressed});
-  final IconData icon;
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onPressed != null;
-    return SizedBox(
-      width: double.infinity,
-      height: 58,
-      child: FilledButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, color: enabled ? const Color(0xFF031318) : Colors.white54),
-        label: Text(label),
-        style: FilledButton.styleFrom(
-          backgroundColor: enabled ? const Color(0xFF00F2EA) : const Color(0xFF2A313C),
-          foregroundColor: enabled ? const Color(0xFF031318) : Colors.white54,
-          disabledBackgroundColor: const Color(0xFF2A313C),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5),
-        ),
-      ),
-    );
-  }
-}
-
 class _GlassPanel extends StatelessWidget {
-  const _GlassPanel({required this.child, this.padding = const EdgeInsets.all(16)});
+  const _GlassPanel({required this.child, this.padding = const EdgeInsets.all(20)});
   final Widget child;
   final EdgeInsets padding;
 
@@ -662,31 +624,11 @@ class _InstantBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF05070D), Color(0xFF07111F), Color(0xFF111827)],
-        ),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF05070D), Color(0xFF07111F), Color(0xFF111827)]),
       ),
       child: Stack(children: [
-        Positioned(
-          top: -110,
-          right: -80,
-          width: 260,
-          height: 260,
-          child: DecoratedBox(
-            decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF00F2EA).withOpacity(.13)),
-          ),
-        ),
-        Positioned(
-          bottom: 120,
-          left: -100,
-          width: 240,
-          height: 240,
-          child: DecoratedBox(
-            decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF8B5CF6).withOpacity(.11)),
-          ),
-        ),
+        Positioned(top: -110, right: -80, width: 260, height: 260, child: DecoratedBox(decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF00F2EA).withOpacity(.13)))),
+        Positioned(bottom: 120, left: -100, width: 240, height: 240, child: DecoratedBox(decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF8B5CF6).withOpacity(.11)))),
       ]),
     );
   }
@@ -700,27 +642,27 @@ class _DoneOverlay extends StatefulWidget {
 }
 
 class _DoneOverlayState extends State<_DoneOverlay> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
+  late final AnimationController controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..forward();
+    controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _controller,
+      animation: controller,
       builder: (context, _) {
-        final value = Curves.easeOutCubic.transform(_controller.value);
-        final opacity = (1 - _controller.value).clamp(0.0, 1.0).toDouble();
+        final value = Curves.easeOutCubic.transform(controller.value);
+        final opacity = (1 - controller.value).clamp(0.0, 1.0).toDouble();
         return Center(
           child: Transform.scale(
             scale: .72 + value * .38,
@@ -729,11 +671,7 @@ class _DoneOverlayState extends State<_DoneOverlay> with SingleTickerProviderSta
               child: Container(
                 width: 128,
                 height: 128,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF00F2EA).withOpacity(.18),
-                  border: Border.all(color: const Color(0xFF00F2EA).withOpacity(.55), width: 2),
-                ),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF00F2EA).withOpacity(.18), border: Border.all(color: const Color(0xFF00F2EA).withOpacity(.55), width: 2)),
                 child: const Icon(Icons.download_done_rounded, color: Colors.white, size: 58),
               ),
             ),
@@ -789,22 +727,17 @@ class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
         if (type === 'img' || lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') || lower.includes('.webp') || lower.includes('mime=image') || lower.includes('image/jpeg') || lower.includes('image/webp')) return 'image';
         return null;
       }
-      function wake() {
-        try {
-          document.querySelectorAll('video').forEach(function(v) {
-            try { v.muted = true; v.setAttribute('playsinline', ''); v.playsInline = true; const p = v.play(); if (p && p.catch) p.catch(function() {}); } catch (e) {}
-          });
-          document.querySelectorAll('button,[role="button"],a').forEach(function(el) {
-            try { const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).toLowerCase(); if (label.includes('play') || label.includes('watch') || label.includes('view') || label.includes('open')) el.click(); } catch (e) {}
-          });
-          window.scrollBy(0, Math.max(120, Math.floor(window.innerHeight * 0.35)));
-        } catch (e) {}
-      }
-      wake();
-      document.querySelectorAll('video').forEach(function(v) {
-        [v.currentSrc, v.src, v.poster].forEach(function(u) { if (u) push(classify(u, 'video') || 'video', u, v.videoWidth || null, v.videoHeight || null); });
-        v.querySelectorAll('source').forEach(function(s) { if (s.src) push(classify(s.src, 'video') || 'video', s.src, null, null); });
-      });
+      try {
+        document.querySelectorAll('video').forEach(function(v) {
+          try { v.muted = true; v.setAttribute('playsinline', ''); v.playsInline = true; const p = v.play(); if (p && p.catch) p.catch(function() {}); } catch (e) {}
+          [v.currentSrc, v.src, v.poster].forEach(function(u) { if (u) push(classify(u, 'video') || 'video', u, v.videoWidth || null, v.videoHeight || null); });
+          v.querySelectorAll('source').forEach(function(s) { if (s.src) push(classify(s.src, 'video') || 'video', s.src, null, null); });
+        });
+        document.querySelectorAll('button,[role="button"],a').forEach(function(el) {
+          try { const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).toLowerCase(); if (label.includes('play') || label.includes('watch') || label.includes('view') || label.includes('open')) el.click(); } catch (e) {}
+        });
+        window.scrollBy(0, Math.max(120, Math.floor(window.innerHeight * 0.35)));
+      } catch (e) {}
       document.querySelectorAll('img').forEach(function(img) { const u = img.currentSrc || img.src; if (u && img.naturalWidth > 240) push('image', u, img.naturalWidth, img.naturalHeight); });
       document.querySelectorAll('source,a,meta[property="og:video"],meta[property="og:video:url"],meta[property="og:image"],meta[name="twitter:player:stream"],meta[name="twitter:image"]').forEach(function(el) {
         const u = el.src || el.href || el.content || el.getAttribute('content') || '';
