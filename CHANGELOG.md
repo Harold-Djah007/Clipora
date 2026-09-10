@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.2 Clipora Instant paste-to-download
+- Replaced the analyze-pick-save Studio flow with the simpler Pinget-style instant flow: paste/share link -> Clipora starts downloading automatically.
+- Kept a manual Download Now button only as a fallback/retry, not as a required step.
+- Kept hidden Field Mode capture inside the Save screen so normal link access does not visibly switch pages.
+- Preserved the optional resolver boost for non-Threads services and kept Threads on the existing local Smart Capture path.
+- Updated mobile description/version to 2.0.2+42.
+
 ## 2.0.1 Clipora Studio workflow break
 - Replaced the old direct Smart Save feel with a visibly different three-step Studio flow: Paste -> Analyze -> Pick -> Save.
 - Added a picker-ready scan stage so Clipora first builds a media plan, then lets the user see and select detected videos/photos before saving.
