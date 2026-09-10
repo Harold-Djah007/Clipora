@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.8 Extractor-pipeline universal saver
+- Upgraded the non-Threads universal backend toward the same architecture used by strong open-source downloaders: site extractors first, playlist/story entries preserved, nested media URL scanning, backend media proxy/cache for videos, and host/path dedupe for signed URLs.
+- Threads remains unchanged on its local Smart Capture path.
+- The resolver keeps up to 20 carousel/story items and avoids saving poster images when video-like metadata exists.
+- Added regression tests for nested story media URLs, multi-image photo carousels, signed URL dedupe, and best-quality selection.
+
 ## 0.8.7 Field Mode commercial polish
 - Field Mode is the default: Clipora can run on a phone without a PC backend/server.
 - Optional Resolver URLs still work for advanced LAN/cloud setups, but they are no longer required.
