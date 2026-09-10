@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 Clipora Studio workflow break
+- Replaced the old direct Smart Save feel with a visibly different three-step Studio flow: Paste -> Analyze -> Pick -> Save.
+- Added a picker-ready scan stage so Clipora first builds a media plan, then lets the user see and select detected videos/photos before saving.
+- Added AppState scanForMedia() and saveResolvedMedia() stages while keeping the old resolveAndDownload() wrapper only for compatibility.
+- Kept Threads on the existing local Smart Capture path as requested.
+- Kept the non-Threads extractor route based on yt-dlp-style extraction, cobalt-style picker/tunnel thinking, Seal-style mobile task UX, and gallery-dl-style nested media scanning without copying incompatible GPL/AGPL app code.
+
 ## 2.0.0 Clipora 2.0 Smart Save rebuild
 - Rebuilt the mobile Save experience into a cleaner professional Smart Save Command Center.
 - Switched the app shell and launch experience to Clipora 2.0 branding, faster launch timing, glass navigation, and a cleaner premium dark system.
