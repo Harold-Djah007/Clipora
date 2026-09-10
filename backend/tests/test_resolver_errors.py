@@ -73,6 +73,23 @@ def test_public_error_explains_threads_failure():
     assert message.startswith("Threads did not return")
 
 
+def test_public_error_threads_share_miss_is_not_login_wall():
+    message = public_resolver_error(
+        ValueError(
+            "No downloadable media found. Threads did not return a public photo or video for this link. "
+            "Open the post, tap Share, and send it to Clipora again."
+        )
+    )
+    assert message.startswith("Threads did not return")
+    assert "account login" not in message
+
+
+def test_public_error_threads_may_be_private_is_not_login_wall():
+    message = public_resolver_error(ValueError("No downloadable media found. The post may be private or unavailable."))
+    assert "account login" not in message
+    assert "cookies" not in message.lower()
+
+
 def test_public_error_empty_text_still_has_fallback():
     message = public_resolver_error(RuntimeError("ERROR:"))
     assert message == "The resolver could not extract downloadable media from this link."

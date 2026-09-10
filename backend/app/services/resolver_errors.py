@@ -60,9 +60,7 @@ def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
         or "only available for registered" in lowered
         or "login required" in lowered
         or "please log in" in lowered
-        or "sign in" in lowered
         or "age-restrict" in lowered
-        or ("private" in lowered and "clipora resolves public" not in lowered)
     ):
         return _PRIVATE
 
@@ -86,11 +84,15 @@ def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
         or "requested format" in lowered
         or "github.com/yt-dlp" in lowered
         or "yt-dlp" in lowered
+        or "did not return a public" in lowered
+        or "expired share" in lowered
     )
     if extract_failed:
         for token, message in _PLATFORM_RETRY:
             if token in lowered:
                 return message
+    if "sign in" in lowered or "private video" in lowered:
+        return _PRIVATE
     if "ffmpeg" in lowered:
         return (
             "This video did not include a single downloadable file. "

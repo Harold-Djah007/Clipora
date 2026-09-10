@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.6+52 Public Threads share links
+- `/share/` links now follow the canonical public post instead of a login interstitial.
+- Threads extract misses are no longer labeled as a private/login-wall.
+- Clipora still does not collect Threads passwords or bypass private access.
+
 ## 2.0.6+51 Public photo fallbacks for Pinterest, Instagram, X, and Facebook
 - Pinterest HLS pins now save the pin image when FFmpeg is missing instead of failing the download.
 - Instagram photo/reel pages scrape public `og:image` / carousel JSON when yt-dlp reports "no video formats".

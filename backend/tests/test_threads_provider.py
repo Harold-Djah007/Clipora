@@ -163,3 +163,91 @@ def test_http_threads_prefers_video_html_over_og_image(monkeypatch):
     assert len(post.media) == 1
     assert post.media[0].media_type == "video"
     assert post.media[0].url.endswith("real.mp4")
+
+
+def test_http_threads_share_refetches_canonical_post(monkeypatch):
+    share = "https://www.threads.com/share/BBMseD6fqS/"
+    canonical = "https://www.threads.com/@bob/post/XYZ"
+    share_html = f'<link rel="canonical" href="{canonical}">'
+    post_html = '{"video_versions":[{"url":"https://scontent.cdninstagram.com/v/t1/real.mp4"}]}'
+
+    class Response:
+        def __init__(self, url, location="", text="", status=200):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = text
+            self.status_code = status
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            if "/login" in url:
+                raise AssertionError("share resolver must not follow login redirects")
+            if "/share/" in url:
+                return Response(url, text=share_html)
+            if "/post/" in url:
+                return Response(canonical, text=post_html)
+            return Response(url, text="")
+
+    monkeypatch.setattr("app.services.threads_provider.httpx.AsyncClient", Client)
+    post = asyncio.run(HttpThreadsProvider().resolve(share))
+    assert post.post_id == "XYZ"
+    assert post.media[0].media_type == "video"
+
+
+def test_http_threads_share_ignores_login_redirect(monkeypatch):
+    share = "https://www.threads.com/share/BBMseD6fqS/"
+    canonical = "https://www.threads.com/@bob/post/XYZ"
+    share_html = f'<link rel="canonical" href="{canonical}">'
+    post_html = '{"video_versions":[{"url":"https://scontent.cdninstagram.com/v/t1/real.mp4"}]}'
+
+    class Response:
+        def __init__(self, url, location="", text="", status=200):
+            self.url = url
+            self.headers = {"location": location} if location else {}
+            self.text = text
+            self.status_code = status
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            if "/login" in url:
+                raise AssertionError("share resolver must not follow login redirects")
+            if "/share/" in url:
+                return Response(
+                    url,
+                    location="https://www.threads.com/login/?next=/share/BBMseD6fqS/",
+                    status=302,
+                    text=share_html,
+                )
+            if "/post/" in url:
+                return Response(canonical, text=post_html)
+            return Response(url, text="")
+
+    monkeypatch.setattr("app.services.threads_provider.httpx.AsyncClient", Client)
+    post = asyncio.run(HttpThreadsProvider().resolve(share))
+    assert post.post_id == "XYZ"

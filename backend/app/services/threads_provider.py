@@ -376,22 +376,27 @@ class HttpThreadsProvider(ThreadsProvider):
 
         last_error: Exception | None = None
         best_post: Optional[ResolvedPost] = None
-        for headers in self._request_profiles():
-            try:
-                page_url, html = await self._fetch_public_page(url, headers)
-                post = self.parser.parse(html, page_url)
-            except ValueError as exc:
-                message = str(exc).lower()
-                if "invalid or expired share" in message:
-                    raise
-                last_error = exc
-                continue
-            except Exception as exc:
-                last_error = exc
-                continue
-            if any(item.media_type == "video" for item in post.media):
-                return post
-            best_post = post
+        for candidate in self._candidate_urls(url):
+            for headers in self._request_profiles(candidate):
+                try:
+                    page_url, html = await self._fetch_public_page(candidate, headers)
+                    identity = self.parser._identity_url(html, page_url)
+                    if (
+                        identity
+                        and identity.split("?", 1)[0].rstrip("/") != page_url.split("?", 1)[0].rstrip("/")
+                        and self.parser._looks_like_post_identity(identity)
+                    ):
+                        try:
+                            page_url, html = await self._fetch_public_page(identity, headers)
+                        except Exception:
+                            pass
+                    post = self.parser.parse(html, page_url)
+                except Exception as exc:
+                    last_error = exc
+                    continue
+                if any(item.media_type == "video" for item in post.media):
+                    return post
+                best_post = post
         if best_post is not None:
             return best_post
         if last_error is not None:
@@ -413,24 +418,49 @@ class HttpThreadsProvider(ThreadsProvider):
                 html = response.text or html
                 location = str(response.headers.get("location") or "").strip()
                 final_url = str(response.url)
-                if self._is_threads_url(final_url):
+                if self._is_threads_url(final_url) and not self._is_login_url(final_url):
                     current = final_url
                 if location:
                     nxt = urljoin(current, location)
-                    if self._is_threads_url(nxt):
+                    if self._is_threads_url(nxt) and not self._is_login_url(nxt):
                         current = nxt
                         if response.status_code in {301, 302, 303, 307, 308}:
                             continue
+                    if self._is_login_url(nxt):
+                        break
                 if response.status_code >= 400:
                     response.raise_for_status()
                 break
-            if not self._is_threads_url(current):
+            if not self._is_threads_url(current) or self._is_login_url(current):
                 raise ValueError("Threads redirected away from the requested post")
-            if "error=invalid_post" in current.lower() and "/post/" not in current:
+            if "error=invalid_post" in current.lower() and "/post/" not in current and "/t/" not in current:
                 raise ValueError(
                     "Threads returned an invalid or expired share page. Open the post in Threads, tap Share, and send it to Clipora again."
                 )
             return current, html
+
+    @classmethod
+    def _candidate_urls(cls, url: str) -> list[str]:
+        urls: list[str] = []
+        parsed = urlparse(url.strip())
+        path = parsed.path or "/"
+        share = re.search(r"/share/([^/?#]+)", path, re.I)
+        if share:
+            token = share.group(1).strip("/")
+            for host in ("www.threads.com", "www.threads.net", "threads.com", "threads.net"):
+                candidate = f"https://{host}/share/{token}/"
+                if candidate not in urls:
+                    urls.append(candidate)
+        host = (parsed.hostname or "").lower()
+        swapped = url
+        if host.endswith("threads.com"):
+            swapped = url.replace("://www.threads.com", "://www.threads.net", 1).replace("://threads.com", "://threads.net", 1)
+        elif host.endswith("threads.net"):
+            swapped = url.replace("://www.threads.net", "://www.threads.com", 1).replace("://threads.net", "://threads.com", 1)
+        for candidate in (url, swapped):
+            if candidate not in urls:
+                urls.append(candidate)
+        return urls
 
     @classmethod
     def _is_allowed_page_host(cls, host: str) -> bool:
@@ -442,26 +472,32 @@ class HttpThreadsProvider(ThreadsProvider):
         return cls._is_allowed_page_host((urlparse(url).hostname or "").lower())
 
     @staticmethod
-    def _request_profiles() -> tuple[dict[str, str], ...]:
+    def _is_login_url(url: str) -> bool:
+        path = (urlparse(url).path or "").lower()
+        return "/login" in path or "/accounts/login" in path or "checkpoint" in path
+
+    @classmethod
+    def _request_profiles(cls, url: str) -> tuple[dict[str, str], ...]:
         referer = {"Referer": "https://www.threads.com/"}
-        return (
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                **referer,
-            },
-            {
-                "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-                "Accept-Language": "en-GB,en;q=0.9",
-                **referer,
-            },
-            {"User-Agent": "facebookexternalhit/1.1", "Accept": "text/html,*/*", **referer},
-        )
+        chrome = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            **referer,
+        }
+        android = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+            **referer,
+        }
+        bot = {"User-Agent": "facebookexternalhit/1.1", "Accept": "text/html,*/*", **referer}
+        if "/share/" in (urlparse(url).path or "").lower():
+            return (bot, chrome, android)
+        return (chrome, android, bot)
 
 
 provider: ThreadsProvider = HttpThreadsProvider()
