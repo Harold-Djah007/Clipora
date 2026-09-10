@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/app_state.dart';
@@ -24,19 +23,16 @@ class Clipora2DownloadsScreen extends StatefulWidget {
 class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with WidgetsBindingObserver {
   final controller = TextEditingController();
   final scrollController = ScrollController();
-  final List<_CaptureRequest> _captureQueue = [];
 
   static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 
   String? clipboardUrl;
   String? errorText;
   String? lastAutoFingerprint;
-  _CaptureRequest? activeCapture;
   _InstantStage stage = _InstantStage.idle;
   Timer? autoTimer;
   Timer? doneTimer;
   bool showDone = false;
-  int captureSeq = 0;
 
   @override
   void initState() {
@@ -54,13 +50,6 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     autoTimer?.cancel();
     doneTimer?.cancel();
     scrollController.dispose();
-    final pending = [if (activeCapture != null) activeCapture!, ..._captureQueue];
-    for (final request in pending) {
-      request.timeout?.cancel();
-      if (!request.completer.isCompleted) {
-        request.completer.completeError(StateError('Clipora closed before capture finished.'));
-      }
-    }
     controller.dispose();
     super.dispose();
   }
@@ -153,7 +142,10 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     });
 
     try {
-      final ok = await context.read<AppState>().resolveAndDownload(urls, sourceLoader: _captureInBackground);
+      final ok = await context.read<AppState>().resolveAndDownload(
+        urls,
+        sourceLoader: (_) async => throw StateError('On-device page capture is disabled. Clipora Instant uses the resolver engine only.'),
+      );
       if (!mounted) return;
       if (ok) {
         setState(() {
@@ -179,46 +171,6 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
         errorText = _cleanError(error);
       });
     }
-  }
-
-  Future<String> _captureInBackground(String url) {
-    final request = _CaptureRequest(id: captureSeq++, url: url, completer: Completer<String>());
-    request.timeout = Timer(const Duration(seconds: 46), () {
-      _completeCapture(
-        request,
-        error: StateError('Field capture timed out before the page exposed real media. Open it once in Access, let it play, then retry.'),
-      );
-    });
-    _captureQueue.add(request);
-    _pumpCaptureQueue();
-    return request.completer.future;
-  }
-
-  void _pumpCaptureQueue() {
-    if (!mounted || activeCapture != null || _captureQueue.isEmpty) return;
-    setState(() => activeCapture = _captureQueue.removeAt(0));
-  }
-
-  void _completeCapture(_CaptureRequest request, {String? source, Object? error}) {
-    request.timeout?.cancel();
-    _captureQueue.remove(request);
-    if (activeCapture != request) return;
-    if (!request.completer.isCompleted) {
-      if (source != null && source.isNotEmpty) {
-        request.completer.complete(source);
-      } else {
-        request.completer.completeError(error ?? StateError('Field capture ended before media was found.'));
-      }
-    }
-    if (!mounted) return;
-    setState(() => activeCapture = null);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _pumpCaptureQueue());
-  }
-
-  void _completeActiveCapture({String? source, Object? error}) {
-    final request = activeCapture;
-    if (request == null) return;
-    _completeCapture(request, source: source, error: error);
   }
 
   void _flashDone() {
@@ -284,7 +236,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
               const SizedBox(height: 14),
               _StatusPanel(stage: stage, status: app.status, busy: busy, error: errorText),
               const SizedBox(height: 14),
-              _RoutePanel(hasBackend: hasBackend, captureActive: activeCapture != null),
+              _RoutePanel(hasBackend: hasBackend),
               if (recent.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 _RecentPanel(recent: recent),
@@ -294,24 +246,6 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
             ],
           ),
         ),
-        if (activeCapture != null)
-          Positioned(
-            left: 0,
-            top: 0,
-            width: MediaQuery.sizeOf(context).width,
-            height: MediaQuery.sizeOf(context).height * .78,
-            child: Opacity(
-              opacity: 0.01,
-              child: IgnorePointer(
-                child: _HiddenCaptureHost(
-                  key: ValueKey(activeCapture!.id),
-                  url: activeCapture!.url,
-                  onComplete: (source) => _completeActiveCapture(source: source),
-                  onFailed: (error) => _completeActiveCapture(error: error),
-                ),
-              ),
-            ),
-          ),
         if (showDone) const Positioned.fill(child: IgnorePointer(child: _DoneOverlay())),
       ]),
     );
@@ -331,7 +265,7 @@ class _Header extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Clipora Instant', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1)),
           SizedBox(height: 3),
-          Text('Paste. Auto-download. Done.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
+          Text('Paste. Resolver downloads. Done.', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 12.5)),
         ]),
       ),
       _ModeBadge(hasBackend: hasBackend),
@@ -375,8 +309,8 @@ class _PastePanel extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 hasBackend
-                    ? 'Resolver Boost starts immediately and saves every real media item.'
-                    : 'Field Mode starts immediately on this phone. Add a hosted resolver later for the hardest services.',
+                    ? 'Every platform uses the resolver engine. No phone web-player capture.'
+                    : 'Connect a hosted resolver once, then Clipora becomes paste-and-download for every platform.',
                 style: const TextStyle(color: Colors.white60, height: 1.35, fontSize: 13.2),
               ),
             ]),
@@ -409,7 +343,7 @@ class _PastePanel extends StatelessWidget {
                 .map((match) => CliporaPill(
                       icon: match.icon,
                       label: match.label,
-                      value: hasBackend && !match.isThreads ? 'resolver' : 'field',
+                      value: hasBackend ? 'resolver' : 'needs resolver',
                       color: match.accent,
                     ))
                 .toList(growable: false),
@@ -464,7 +398,7 @@ class _StatusPanel extends StatelessWidget {
           const SizedBox(height: 12),
           const ClipRRect(borderRadius: BorderRadius.all(Radius.circular(999)), child: LinearProgressIndicator(minHeight: 6)),
           const SizedBox(height: 8),
-          const Text('No page switching. Clipora is resolving and saving quietly.', style: TextStyle(color: Colors.white54, fontSize: 12.5)),
+          const Text('No page switching. Clipora is using the resolver engine and saving quietly.', style: TextStyle(color: Colors.white54, fontSize: 12.5)),
         ],
       ]),
     );
@@ -472,9 +406,8 @@ class _StatusPanel extends StatelessWidget {
 }
 
 class _RoutePanel extends StatelessWidget {
-  const _RoutePanel({required this.hasBackend, required this.captureActive});
+  const _RoutePanel({required this.hasBackend});
   final bool hasBackend;
-  final bool captureActive;
 
   @override
   Widget build(BuildContext context) {
@@ -483,7 +416,7 @@ class _RoutePanel extends StatelessWidget {
       child: Row(children: [
         const Expanded(child: _RouteStep(icon: Icons.travel_explore_rounded, title: 'Detect', body: 'auto')),
         const Icon(Icons.chevron_right_rounded, color: Colors.white24),
-        Expanded(child: _RouteStep(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.phone_android_rounded, title: hasBackend ? 'Resolve' : 'Capture', body: captureActive ? 'hidden' : (hasBackend ? 'boost' : 'field'))),
+        Expanded(child: _RouteStep(icon: hasBackend ? Icons.cloud_sync_rounded : Icons.cloud_off_rounded, title: 'Resolve', body: hasBackend ? 'engine' : 'needed')),
         const Icon(Icons.chevron_right_rounded, color: Colors.white24),
         const Expanded(child: _RouteStep(icon: Icons.download_done_rounded, title: 'Save', body: 'gallery')),
       ]),
@@ -545,7 +478,7 @@ class _BoundaryNote extends StatelessWidget {
     return _GlassPanel(
       padding: const EdgeInsets.all(15),
       child: const Text(
-        'Clipora Instant saves public/shareable media and media you are authorized to access. No watermark-removal tool, no password collection, no private-access bypass. Threads keeps the existing capture path.',
+        'Clipora Instant saves public/shareable media and media you are authorized to access. No watermark-removal tool, no password collection, no private-access bypass, and no in-app social page capture.',
         style: TextStyle(color: Colors.white54, height: 1.38, fontSize: 12.4),
       ),
     );
@@ -566,9 +499,9 @@ class _ModeBadge extends StatelessWidget {
         border: Border.all(color: Colors.white.withOpacity(.10)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(hasBackend ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 14, color: const Color(0xFF8BE9E0)),
+        Icon(hasBackend ? Icons.cloud_done_rounded : Icons.cloud_off_rounded, size: 14, color: const Color(0xFF8BE9E0)),
         const SizedBox(width: 6),
-        Text(hasBackend ? 'Boost' : 'Field', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
+        Text(hasBackend ? 'Resolver' : 'Connect', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
       ]),
     );
   }
@@ -677,163 +610,6 @@ class _DoneOverlayState extends State<_DoneOverlay> with SingleTickerProviderSta
             ),
           ),
         );
-      },
-    );
-  }
-}
-
-class _CaptureRequest {
-  _CaptureRequest({required this.id, required this.url, required this.completer});
-  final int id;
-  final String url;
-  final Completer<String> completer;
-  Timer? timeout;
-}
-
-class _HiddenCaptureHost extends StatefulWidget {
-  const _HiddenCaptureHost({super.key, required this.url, required this.onComplete, required this.onFailed});
-  final String url;
-  final ValueChanged<String> onComplete;
-  final ValueChanged<Object> onFailed;
-
-  @override
-  State<_HiddenCaptureHost> createState() => _HiddenCaptureHostState();
-}
-
-class _HiddenCaptureHostState extends State<_HiddenCaptureHost> {
-  InAppWebViewController? _controller;
-  String? _lastSource;
-  bool _done = false;
-  Timer? _timeout;
-
-  static const _js = r'''
-    (function() {
-      function abs(u) { try { return new URL(u, location.href).href; } catch (e) { return u; } }
-      const runtime = [];
-      const seen = new Set();
-      function push(kind, u, w, h) {
-        if (!u) return;
-        const url = abs(u);
-        const key = kind + ':' + url;
-        if (seen.has(key)) return;
-        seen.add(key);
-        runtime.push({kind: kind, url: url, width: w || null, height: h || null});
-      }
-      function classify(u, initiator) {
-        const lower = (u || '').toLowerCase();
-        const type = (initiator || '').toLowerCase();
-        if (!lower || lower.indexOf('http') !== 0) return null;
-        if (type === 'video' || lower.includes('.mp4') || lower.includes('mime=video') || lower.includes('mime_type=video') || lower.includes('video/mp4') || lower.includes('video_mp4') || lower.includes('/video/')) return 'video';
-        if (type === 'img' || lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') || lower.includes('.webp') || lower.includes('mime=image') || lower.includes('image/jpeg') || lower.includes('image/webp')) return 'image';
-        return null;
-      }
-      try {
-        document.querySelectorAll('video').forEach(function(v) {
-          try { v.muted = true; v.setAttribute('playsinline', ''); v.playsInline = true; const p = v.play(); if (p && p.catch) p.catch(function() {}); } catch (e) {}
-          [v.currentSrc, v.src, v.poster].forEach(function(u) { if (u) push(classify(u, 'video') || 'video', u, v.videoWidth || null, v.videoHeight || null); });
-          v.querySelectorAll('source').forEach(function(s) { if (s.src) push(classify(s.src, 'video') || 'video', s.src, null, null); });
-        });
-        document.querySelectorAll('button,[role="button"],a').forEach(function(el) {
-          try { const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).toLowerCase(); if (label.includes('play') || label.includes('watch') || label.includes('view') || label.includes('open')) el.click(); } catch (e) {}
-        });
-        window.scrollBy(0, Math.max(120, Math.floor(window.innerHeight * 0.35)));
-      } catch (e) {}
-      document.querySelectorAll('img').forEach(function(img) { const u = img.currentSrc || img.src; if (u && img.naturalWidth > 240) push('image', u, img.naturalWidth, img.naturalHeight); });
-      document.querySelectorAll('source,a,meta[property="og:video"],meta[property="og:video:url"],meta[property="og:image"],meta[name="twitter:player:stream"],meta[name="twitter:image"]').forEach(function(el) {
-        const u = el.src || el.href || el.content || el.getAttribute('content') || '';
-        const kind = classify(u, '');
-        if (kind) push(kind, u, null, null);
-      });
-      try { performance.getEntriesByType('resource').forEach(function(entry) { const kind = classify(entry.name || '', entry.initiatorType || ''); if (kind) push(kind, entry.name, null, null); }); } catch (e) {}
-      const canonical = document.querySelector('link[rel="canonical"]');
-      const videoCount = runtime.filter(function(x){ return x.kind === 'video'; }).length;
-      const imageCount = runtime.filter(function(x){ return x.kind === 'image'; }).length;
-      return JSON.stringify({html: document.documentElement ? document.documentElement.outerHTML : '', pageUrl: location.href, canonicalUrl: canonical ? canonical.href : location.href, runtimeMedia: runtime, videoCount: videoCount, imageCount: imageCount, hasVideo: videoCount > 0 || !!document.querySelector('video'), captureMode: 'field'});
-    })();
-  ''';
-
-  @override
-  void initState() {
-    super.initState();
-    _timeout = Timer(const Duration(seconds: 44), () {
-      if (_done) return;
-      if (_lastSource != null && _lastSource!.isNotEmpty) {
-        _finish(_lastSource!);
-      } else {
-        _fail(StateError('Field capture timed out before the page exposed media.'));
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _timeout?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _capture({bool finalAttempt = false}) async {
-    if (_done || _controller == null) return;
-    try {
-      final raw = await _controller!.evaluateJavascript(source: _js);
-      if (raw is! String || raw.isEmpty || raw == 'null') return;
-      final source = raw.startsWith('"') ? _unquote(raw) : raw;
-      _lastSource = source;
-      if (_hasRealMedia(source) || finalAttempt) _finish(source);
-    } catch (error) {
-      if (finalAttempt) _fail(error);
-    }
-  }
-
-  bool _hasRealMedia(String source) {
-    final lower = source.toLowerCase();
-    return lower.contains('.mp4') ||
-        lower.contains('"kind":"video"') ||
-        lower.contains('mime=video') ||
-        lower.contains('mime_type=video') ||
-        lower.contains('video/mp4') ||
-        lower.contains('video_mp4') ||
-        (!lower.contains('"hasvideo":true') && lower.contains('"kind":"image"'));
-  }
-
-  void _finish(String source) {
-    if (_done) return;
-    _done = true;
-    _timeout?.cancel();
-    widget.onComplete(source);
-  }
-
-  void _fail(Object error) {
-    if (_done) return;
-    _done = true;
-    _timeout?.cancel();
-    widget.onFailed(error);
-  }
-
-  String _unquote(String raw) {
-    if (raw.length < 2) return raw;
-    return raw.substring(1, raw.length - 1).replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return InAppWebView(
-      initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        thirdPartyCookiesEnabled: true,
-        cacheEnabled: true,
-        mediaPlaybackRequiresUserGesture: false,
-        allowsInlineMediaPlayback: true,
-      ),
-      onWebViewCreated: (controller) => _controller = controller,
-      onProgressChanged: (_, progress) {
-        if (progress > 35 && !_done) unawaited(_capture());
-      },
-      onLoadStop: (_, __) async {
-        for (var i = 0; i < 36 && !_done; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 650));
-          await _capture(finalAttempt: i == 35);
-        }
       },
     );
   }
