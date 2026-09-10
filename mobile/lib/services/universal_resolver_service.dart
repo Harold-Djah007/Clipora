@@ -10,7 +10,7 @@ class UniversalResolverService {
   UniversalResolverService({Dio? dio, String? preferredBaseUrl})
       : _dio = dio ??
             Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 2),
+              connectTimeout: const Duration(seconds: 4),
               sendTimeout: const Duration(seconds: 12),
               receiveTimeout: const Duration(seconds: 180),
               validateStatus: (code) => code != null && code >= 200 && code < 500,
@@ -149,6 +149,18 @@ class UniversalResolverService {
 
   static String _shortError(Object? error) {
     if (error == null) return 'unknown';
+    if (error is DioException) {
+      switch (error.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.connectionError:
+          return 'connection failed. Start the Clipora backend, then run: adb reverse tcp:8010 tcp:8010';
+        case DioExceptionType.receiveTimeout:
+        case DioExceptionType.sendTimeout:
+          return 'the resolver took too long to respond. Check the backend terminal and retry.';
+        default:
+          break;
+      }
+    }
     final text = _cleanError(error.toString());
     return text.length > 140 ? '${text.substring(0, 140)}…' : text;
   }

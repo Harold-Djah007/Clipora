@@ -164,7 +164,7 @@ class InstantShareDownloadService : Service() {
         val body = JSONObject().put("url", sourceUrl).toString().toByteArray(Charsets.UTF_8)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 2500
+            connectTimeout = 5000
             readTimeout = 180000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")

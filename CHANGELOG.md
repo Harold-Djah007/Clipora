@@ -6,7 +6,8 @@
 - Hardened TikTok short-link handling and stopped forcing headers that caused redirects to `tiktok.com/?_r=1`.
 - Replaced raw ANSI/yt-dlp dumps with concise errors suitable for notifications and the mobile UI.
 - Fixed gallery publishing on Android 9 and earlier, honored Wi-Fi-only for native share downloads, and synchronized backend/app version reporting.
-- Reduced launch delay and updated the mobile version to 2.0.6+46.
+- Reduced launch delay and updated the mobile version to 2.0.6+47.
+- Replaced low-level Dio connection dumps with a direct backend/ADB recovery message and allowed slower resolver connections more time.
 
 ## 2.0.5 Share-return instant mode
 - Added the Pinget-style handoff: when a user shares a link to Clipora, the app accepts the link, starts the foreground download service, and sends the user back to the source app after about a quarter second.
