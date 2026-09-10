@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.6+49 Debug APK compile fix
+- Replaced the Kotlin `Notification.Builder.priority` field assignment that failed `flutter build apk` with `setPriority()`.
+
 ## 2.0.6+48 Phone test cycle and out-of-app alerts
 - Locked the Windows test path to the PowerShell cycle: venv pip, `pytest -q`, `start_api.ps1`, health check, `adb reverse tcp:8010 tcp:8010`, `flutter test`, then a debug APK with `--dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010`.
 - Hardened TikTok short-link expansion and photo-carousel extraction through yt-dlp, without changing the Threads path.

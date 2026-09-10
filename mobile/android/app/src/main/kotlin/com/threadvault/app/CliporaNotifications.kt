@@ -47,13 +47,10 @@ object CliporaNotifications {
             @Suppress("DEPRECATION")
             Notification.Builder(context)
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            @Suppress("DEPRECATION")
-            builder.priority = Notification.PRIORITY_HIGH
-            @Suppress("DEPRECATION")
-            builder.setDefaults(Notification.DEFAULT_ALL)
-        }
+        @Suppress("DEPRECATION")
         return builder
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setDefaults(Notification.DEFAULT_ALL)
             .setContentTitle(title)
             .setContentText(message)
             .setTicker(title)
