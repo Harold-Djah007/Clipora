@@ -7,3 +7,4 @@ def test_backend_docs_index_exists():
     text = path.read_text(encoding="utf-8")
     assert "universal-resolver.md" in text
     assert "safety-boundary.md" in text
+    assert "local-backend-test.md" in text

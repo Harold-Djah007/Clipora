@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.6+48 Phone test cycle and out-of-app alerts
+- Locked the Windows test path to the PowerShell cycle: venv pip, `pytest -q`, `start_api.ps1`, health check, `adb reverse tcp:8010 tcp:8010`, `flutter test`, then a debug APK with `--dart-define=CLIPORA_RESOLVER_URL=http://127.0.0.1:8010`.
+- Hardened TikTok short-link expansion and photo-carousel extraction through yt-dlp, without changing the Threads path.
+- Added high-importance success and error notifications so Clipora can finish after Share returns you to TikTok.
+
 ## 2.0.6 Seamless resolver hardening
 - Fixed Android build-time resolver injection in the active Gradle configuration.
 - Removed the obsolete WebView capture and misleading local Threads-session screens; every save now follows the resolver-only route.

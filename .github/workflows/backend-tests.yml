@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feature/**
+      - cursor/**
 
 jobs:
   backend-tests:
