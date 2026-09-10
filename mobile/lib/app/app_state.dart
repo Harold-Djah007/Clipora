@@ -185,7 +185,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<bool> resolveAndDownload(List<String> urls) {
-    final batch = _SaveBatch(List<String>.from(urls));
+    final batch = _SaveBatch(UniversalPlatformDetector.normalizeShareUrls(urls));
     final queuedBehindWork = _pumping || _queue.isNotEmpty || busy;
     _queue.add(batch);
     if (queuedBehindWork) {

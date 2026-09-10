@@ -31,4 +31,12 @@ void main() {
     expect(UniversalPlatformDetector.detect('https://vm.tiktok.com/ZMh/').isSupported, isTrue);
     expect(UniversalPlatformDetector.detect('https://www.threads.com/@user/post/abc').isThreads, isTrue);
   });
+
+  test('unwraps Facebook l.php wrappers and drops duplicate post URLs', () {
+    final urls = UniversalPlatformDetector.extractShareUrls(
+      'Watch https://www.facebook.com/watch/?v=1081678357921979 '
+      'https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.facebook.com%2Fwatch%2F%3Fv%3D1081678357921979&h=AT',
+    );
+    expect(urls, ['https://www.facebook.com/watch/?v=1081678357921979']);
+  });
 }

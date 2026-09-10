@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 import httpx
 
@@ -66,10 +66,10 @@ class UniversalProvider:
         re.I,
     )
 
-    _IG_SHORTCODE = re.compile(r"/(?:p|reel|reels|tv)/([A-Za-z0-9_-]{5,})", re.I)
+    _IG_SHORTCODE = re.compile(r"/(?:p|reel|reels|tv|share/reel|share/p)/([A-Za-z0-9_-]{5,})", re.I)
     _X_STATUS_ID = re.compile(r"/(?:status|statuses)/(\d{5,30})", re.I)
     _ydl_opts: dict[str, Any] = {
-        "format": "best[ext=mp4][protocol^=http]/best[ext=mp4]/best[protocol^=http]/best",
+        "format": "best[ext=mp4]/best[protocol^=https]/best/bestvideo+bestaudio",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -159,15 +159,20 @@ class UniversalProvider:
                 video_like = self._has_video_like_format(entry, self._formats(entry)) or any(
                     item.media_type == "video" for item in entry_media
                 )
-                if video_like:
+                if platform_info.platform == Platform.PINTEREST:
+                    pin_video = await loop.run_in_executor(
+                        None, self._pinterest_cached_video, entry, entry_url, url, index
+                    )
+                    if pin_video:
+                        entry_media = [pin_video]
+                if not any(item.media_type == "video" for item in entry_media) and video_like:
                     try:
                         cached = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
-                        if cached:
+                        if cached and any(item.media_type == "video" for item in cached):
                             entry_media = cached
                     except Exception:
-                        if not entry_media:
-                            entry_media = self._image_fallback_from_info(entry)
-                if not entry_media:
+                        pass
+                if not entry_media and not video_like:
                     entry_media = self._image_fallback_from_info(entry)
                 media.extend(entry_media)
 
@@ -178,6 +183,14 @@ class UniversalProvider:
                         None, self._download_to_cache, self._entry_url(info, source_url), info, 1
                     )
                 except Exception:
+                    media = []
+                if not media and platform_info.platform == Platform.PINTEREST:
+                    pin_video = await loop.run_in_executor(
+                        None, self._pinterest_cached_video, info, source_url, url, 1
+                    )
+                    if pin_video:
+                        media = [pin_video]
+                if not media and not self._has_video_like_format(info, self._formats(info)):
                     media = self._image_fallback_from_info(info)
             if media:
                 return UniversalPost(
@@ -300,6 +313,7 @@ class UniversalProvider:
     def _prepare_source_url(self, url: str, platform: Platform) -> str:
         if platform == Platform.THREADS:
             return url
+        url = self._unwrap_facebook_click_wrapper(url)
         if platform == Platform.TIKTOK:
             return self._expand_tiktok_short_url(url)
         return self._expand_share_url(url)
@@ -459,6 +473,7 @@ class UniversalProvider:
     def _expand_share_url(cls, url: str) -> str:
         """Follow public share/short links onto the same platform, cobalt-style."""
 
+        url = cls._unwrap_facebook_click_wrapper(url)
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
         path = parsed.path or ""
@@ -544,6 +559,52 @@ class UniversalProvider:
             )
         )
 
+    @staticmethod
+    def _unwrap_facebook_click_wrapper(url: str) -> str:
+        parsed = urlparse(url)
+        path = (parsed.path or "").lower()
+        if not path.endswith("l.php"):
+            return url
+        dest = ""
+        for key, values in parse_qs(parsed.query, keep_blank_values=False).items():
+            if key.lower() == "u" and values:
+                dest = unquote(str(values[0]).strip())
+                break
+        if dest.lower().startswith("https%3a") or dest.lower().startswith("http%3a"):
+            dest = unquote(dest)
+        if not dest.startswith(("http://", "https://")):
+            return url
+        try:
+            if detect_platform(dest).platform == Platform.UNKNOWN:
+                return url
+        except Exception:
+            return url
+        return dest
+
+    @staticmethod
+    def _is_facebook_click_wrapper(url: str) -> bool:
+        path = (urlparse(url).path or "").lower()
+        return path.endswith("/l.php") or path.endswith("l.php")
+
+    @staticmethod
+    def _url_path_looks_like_video(url: str) -> bool:
+        path = (urlparse(url).path or "").lower()
+        return any(
+            token in path
+            for token in ("/reel/", "/reels/", "/tv/", "/videos/", "/watch", "/share/v/", "/share/reel/")
+        )
+
+    def _html_looks_like_video_post(self, url: str, html: str) -> bool:
+        if self._url_path_looks_like_video(url):
+            return True
+        lowered = html.lower()
+        if "og:video" in lowered or "video_versions" in lowered or '"is_video":true' in lowered:
+            return True
+        if '"media_type":2' in lowered or '"product_type":"clips"' in lowered or "graphvideo" in lowered:
+            return True
+        og_type = (self._html_meta(html, "og:type") or "").lower()
+        return og_type.startswith("video")
+
     def _image_fallback_from_info(self, info: dict[str, Any]) -> list[UniversalMedia]:
         clone = {key: value for key, value in info.items() if key != "formats"}
         clone["formats"] = []
@@ -553,18 +614,103 @@ class UniversalProvider:
             clone.pop("url", None)
         return self._extract_media_items(clone)
 
+    def _first_cached_or_direct(
+        self, items: list[UniversalMedia], source_url: str, index: int
+    ) -> Optional[UniversalMedia]:
+        for item in items:
+            try:
+                return self._cache_http_media(
+                    item.url, item.media_type, source_url, index, item.width, item.height
+                )
+            except Exception:
+                continue
+        return None
+
+    def _pinterest_cached_video(
+        self, info: dict[str, Any], page_url: str, source_url: str, index: int
+    ) -> Optional[UniversalMedia]:
+        cached = self._first_cached_or_direct(self._pinterest_video_candidates(info), source_url, index)
+        if cached:
+            return cached
+        html = self._fetch_public_html(page_url, Platform.PINTEREST) or self._fetch_public_html(
+            source_url, Platform.PINTEREST
+        )
+        return self._first_cached_or_direct(self._pinterest_videos_from_html(html or ""), source_url, index)
+
+    def _pinterest_video_candidates(self, info: dict[str, Any]) -> list[UniversalMedia]:
+        urls: list[str] = []
+        samples = list(self._formats(info))
+        if info.get("url"):
+            samples.append({"url": info.get("url")})
+        for fmt in samples:
+            raw = str(fmt.get("url") or "")
+            if not raw.startswith(("http://", "https://")):
+                continue
+            if "pinimg.com" in raw.lower() and ".mp4" in raw.lower():
+                urls.append(raw)
+            for rewritten in self._pinterest_hls_to_mp4s(raw):
+                urls.append(rewritten)
+        unique: list[UniversalMedia] = []
+        seen: set[str] = set()
+        for url in urls:
+            path = (urlparse(url).path or url).lower()
+            if path in seen:
+                continue
+            seen.add(path)
+            media = self._media_from_url(url, key_hint="video_url")
+            if media and media.media_type == "video":
+                unique.append(media)
+        return unique
+
+    @staticmethod
+    def _pinterest_hls_to_mp4s(url: str) -> list[str]:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path or ""
+        if "pinimg.com" not in host:
+            return []
+        if ".m3u8" not in path.lower() and "/hls" not in path.lower():
+            return []
+        converted = re.sub(r"/hls(?:v\d+)?/", "/720p/", path, flags=re.I)
+        converted = re.sub(r"\.m3u8$", ".mp4", converted, flags=re.I)
+        if not converted.lower().endswith(".mp4"):
+            return []
+        hosts = [host]
+        if host == "v.pinimg.com":
+            hosts.append("v1.pinimg.com")
+        elif host == "v1.pinimg.com":
+            hosts.append("v.pinimg.com")
+        out: list[str] = []
+        seen: set[str] = set()
+        for candidate_host in hosts:
+            for quality in ("/720p/", "/480p/", "/360p/", "/expMp4/"):
+                alt = converted.replace("/720p/", quality)
+                full = parsed._replace(netloc=candidate_host, path=alt, query="").geturl()
+                if full not in seen:
+                    seen.add(full)
+                    out.append(full)
+        return out
+
     def _public_fallback_post(self, original_url: str, source_url: str, platform: Platform) -> Optional[UniversalPost]:
         media: list[UniversalMedia] = []
+        video_post = self._url_path_looks_like_video(original_url) or self._url_path_looks_like_video(source_url)
         if platform == Platform.X:
             media = self._extract_x_public_media(original_url) or self._extract_x_public_media(source_url)
         if not media:
+            poster_only: list[UniversalMedia] = []
             for candidate in self._fallback_page_urls(original_url, source_url, platform):
-                media = self._scrape_public_html_media(candidate, platform)
-                if media:
+                scraped = self._scrape_public_html_media(candidate, platform)
+                videos = [item for item in scraped if item.media_type == "video"]
+                if videos:
+                    media = videos
                     break
+                if scraped and not poster_only:
+                    poster_only = scraped
+            if not media and not video_post:
+                media = poster_only
         if not media:
             return None
-        if platform in {Platform.INSTAGRAM, Platform.FACEBOOK}:
+        if platform in {Platform.INSTAGRAM, Platform.FACEBOOK, Platform.PINTEREST}:
             tunneled: list[UniversalMedia] = []
             for index, item in enumerate(media[: self._MAX_PLAYLIST_MEDIA], start=1):
                 try:
@@ -599,13 +745,21 @@ class UniversalProvider:
         if platform == Platform.INSTAGRAM:
             code = self._instagram_shortcode(source_url) or self._instagram_shortcode(original_url)
             if code:
-                for path in (
-                    f"https://www.instagram.com/p/{code}/",
-                    f"https://www.instagram.com/reel/{code}/",
+                extras = [
+                    f"https://www.instagram.com/reel/{code}/embed/captioned/",
+                    f"https://www.instagram.com/p/{code}/embed/captioned/",
+                    f"https://www.instagram.com/reel/{code}/embed/",
                     f"https://www.instagram.com/p/{code}/embed/",
-                ):
-                    if path not in urls:
-                        urls.append(path)
+                    f"https://www.instagram.com/reel/{code}/",
+                    f"https://www.instagram.com/p/{code}/",
+                ]
+                if self._url_path_looks_like_video(original_url) or self._url_path_looks_like_video(source_url):
+                    ordered = extras + [candidate for candidate in urls if candidate not in extras]
+                    urls = ordered
+                else:
+                    for path in extras:
+                        if path not in urls:
+                            urls.append(path)
         elif platform == Platform.X:
             status_id = self._x_status_id(original_url) or self._x_status_id(source_url)
             if status_id:
@@ -743,17 +897,39 @@ class UniversalProvider:
             video = self._media_from_url(og_video, key_hint="og:video video_url")
             if video:
                 items.insert(0, video)
+        for match in re.finditer(
+            r'"(?:video_url|contentUrl|content_url|playback_url|playable_url)"\s*:\s*"(https?:[^"]+)"',
+            html,
+            re.I,
+        ):
+            video = self._media_from_url(self._decode_url_text(match.group(1)), key_hint="video_url")
+            if video and video.media_type == "video":
+                items.append(video)
         if og_image and not any(item.media_type == "video" for item in items):
             image = self._media_from_url(og_image, key_hint="og:image image_url")
             if image:
                 items.append(image)
         if platform == Platform.PINTEREST:
+            items.extend(self._pinterest_videos_from_html(html))
             items.extend(self._pinterest_images_from_html(html))
         items = [item for item in items if self._fallback_host_allowed(item.url, platform)]
         videos = [item for item in items if item.media_type == "video"]
         if videos:
             return self._dedupe_media(videos)[: self._MAX_PLAYLIST_MEDIA]
+        if self._html_looks_like_video_post(url, html) or self._url_path_looks_like_video(url):
+            return []
         return self._dedupe_media(items)[: self._MAX_PLAYLIST_MEDIA]
+
+    def _pinterest_videos_from_html(self, html: str) -> list[UniversalMedia]:
+        items: list[UniversalMedia] = []
+        for match in re.finditer(r"https://(?:v\d*\.)?pinimg\.com/[^\"'\s<>]+", html, re.I):
+            raw = match.group(0).rstrip("\\")
+            candidates = [raw] if ".mp4" in raw.lower() else self._pinterest_hls_to_mp4s(raw)
+            for url in candidates:
+                video = self._media_from_url(url, key_hint="video_url")
+                if video and video.media_type == "video":
+                    items.append(video)
+        return items
 
     def _pinterest_images_from_html(self, html: str) -> list[UniversalMedia]:
         items: list[UniversalMedia] = []
@@ -768,6 +944,7 @@ class UniversalProvider:
         family = self._host_family(platform)
         profiles = (
             {"User-Agent": "facebookexternalhit/1.1", "Accept": "text/html,*/*"},
+            {"User-Agent": "Twitterbot/1.0", "Accept": "text/html,*/*"},
             {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -867,7 +1044,10 @@ class UniversalProvider:
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             )
-        elif platform in {Platform.FACEBOOK, Platform.SNAPCHAT, Platform.PINTEREST}:
+        elif platform == Platform.PINTEREST:
+            opts["format"] = "best[ext=mp4]/best"
+            headers["Referer"] = "https://www.pinterest.com/"
+        elif platform in {Platform.FACEBOOK, Platform.SNAPCHAT}:
             headers["Referer"] = f"https://{urlparse(url).hostname or 'www.facebook.com'}/"
 
         return opts
@@ -1133,24 +1313,19 @@ class UniversalProvider:
             with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
                 downloaded = ydl.extract_info(url, download=True)
         except Exception as exc:
-            if opts.get("impersonate"):
-                retry_opts = dict(opts)
-                retry_opts.pop("impersonate", None)
-                try:
-                    with yt_dlp.YoutubeDL(retry_opts) as ydl:  # type: ignore[union-attr]
-                        downloaded = ydl.extract_info(url, download=True)
-                except Exception as retry_error:
-                    raise ValueError(
-                        "No direct MP4 was available, and HLS/direct file fallback failed. "
-                        "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
-                        f"Detail: {retry_error}"
-                    ) from retry_error
-            else:
+            retry_opts = dict(opts)
+            retry_opts.pop("impersonate", None)
+            if self._should_retry_without_format(exc):
+                retry_opts.pop("format", None)
+            try:
+                with yt_dlp.YoutubeDL(retry_opts) as ydl:  # type: ignore[union-attr]
+                    downloaded = ydl.extract_info(url, download=True)
+            except Exception as retry_error:
                 raise ValueError(
                     "No direct MP4 was available, and HLS/direct file fallback failed. "
                     "Install ffmpeg for YouTube/X/Facebook streams (winget install Gyan.FFmpeg) and retry. "
-                    f"Detail: {exc}"
-                ) from exc
+                    f"Detail: {retry_error}"
+                ) from retry_error
 
         if isinstance(downloaded, dict) and downloaded.get("entries"):
             downloaded = next((entry for entry in downloaded["entries"] if entry), downloaded)
@@ -1192,6 +1367,11 @@ class UniversalProvider:
         referer = source_url if source_url.startswith("http") else "https://www.threads.com/"
         if parsed_source.scheme != "https":
             referer = "https://www.threads.com/"
+        media_host = (urlparse(url).hostname or "").lower()
+        if "pinimg.com" in media_host:
+            referer = "https://www.pinterest.com/"
+        elif "cdninstagram.com" in media_host or "fbcdn.net" in media_host:
+            referer = "https://www.instagram.com/"
         cache_dir = Path(tempfile.gettempdir()) / "clipora-media"
         cache_dir.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
@@ -1214,7 +1394,9 @@ class UniversalProvider:
                 raise ValueError("Threads CDN returned a page instead of media")
             payload = response.content or b""
             if len(payload) < 256:
-                raise ValueError("Threads CDN returned an empty media file")
+                raise ValueError("CDN returned an empty media file")
+            if media_type == "video" and b"ftyp" not in payload[:64]:
+                raise ValueError("CDN returned a non-MP4 file")
             dest.write_bytes(payload)
         media_file_cache.put(dest, token)
         return UniversalMedia(
@@ -1427,6 +1609,27 @@ class UniversalProvider:
         snap_candidate = host.endswith("sc-cdn.net") and (
             "video" in hint or "play" in hint or "/media/" in lower or "/video/" in lower or "mime=video" in lower
         )
+        ig_host = "cdninstagram.com" in host or "fbcdn.net" in host
+        clearly_image = (
+            ".jpg" in lower
+            or ".jpeg" in lower
+            or ".png" in lower
+            or ".webp" in lower
+            or "stp=dst-jpg" in lower
+            or "stp=dst-png" in lower
+            or "mime=image" in lower
+            or "mime_type=image" in lower
+        )
+        ig_video = ig_host and not clearly_image and (
+            ".mp4" in lower
+            or "/t50." in lower
+            or "/t16/" in lower
+            or "/o1/v/" in lower
+            or "og:video" in hint
+            or "video_url" in hint
+            or "contenturl" in hint
+            or "playable_url" in hint
+        )
         return (
             lower.startswith(("http://", "https://"))
             and not self._is_static_asset_url(url)
@@ -1444,6 +1647,7 @@ class UniversalProvider:
                 or "playback_url" in hint
                 or "video_url" in hint
                 or snap_candidate
+                or ig_video
             )
         )
 

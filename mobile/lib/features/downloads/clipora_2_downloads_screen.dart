@@ -24,8 +24,6 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
   final controller = TextEditingController();
   final scrollController = ScrollController();
 
-  static final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
-
   String? clipboardUrl;
   String? errorText;
   String? lastAutoFingerprint;
@@ -62,15 +60,7 @@ class _Clipora2DownloadsScreenState extends State<Clipora2DownloadsScreen> with 
     }
   }
 
-  List<String> _extractUrls(String raw) {
-    final seen = <String>{};
-    final urls = <String>[];
-    for (final match in _urlPattern.allMatches(raw)) {
-      final value = match.group(0)!.replaceAll(RegExp(r'[),.;]+$'), '');
-      if (seen.add(value)) urls.add(value);
-    }
-    return urls.take(20).toList(growable: false);
-  }
+  List<String> _extractUrls(String raw) => UniversalPlatformDetector.extractShareUrls(raw);
 
   String _fingerprint(List<String> urls) => urls.map((url) => url.trim()).join('\n');
 

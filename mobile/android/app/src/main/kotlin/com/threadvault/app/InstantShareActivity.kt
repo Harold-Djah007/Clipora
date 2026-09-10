@@ -22,7 +22,7 @@ class InstantShareActivity : Activity() {
     }
 
     private fun handleShare(intent: Intent?) {
-        val urls = extractUrls(intent)
+        val urls = ShareLinks.extractFromIntent(intent)
         if (urls.isEmpty()) {
             Toast.makeText(this, "Clipora needs a link to save.", Toast.LENGTH_SHORT).show()
             closeImmediately()
@@ -73,23 +73,6 @@ class InstantShareActivity : Activity() {
             finish()
         }
         overridePendingTransition(0, 0)
-    }
-
-    private fun extractUrls(intent: Intent?): List<String> {
-        if (intent == null) return emptyList()
-        val raw = buildString {
-            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { appendLine(it) }
-            intent.getStringExtra(Intent.EXTRA_SUBJECT)?.let { appendLine(it) }
-            intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.let { appendLine(it) }
-            intent.dataString?.let { appendLine(it) }
-        }
-        if (raw.isBlank()) return emptyList()
-        val seen = linkedSetOf<String>()
-        Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE).findAll(raw).forEach { match ->
-            val url = match.value.trim().trimEnd(',', '.', ';', ')')
-            if (url.isNotBlank()) seen.add(url)
-        }
-        return seen.toList()
     }
 
     companion object {

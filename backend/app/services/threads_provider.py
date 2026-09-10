@@ -331,8 +331,17 @@ class ThreadsHtmlParser:
     @staticmethod
     def _looks_like_video(url: str) -> bool:
         lower = url.lower()
-        return lower.startswith(("http://", "https://")) and (
-            ".mp4" in lower or "mime_type=video" in lower or "mime=video" in lower
+        if not lower.startswith(("http://", "https://")):
+            return False
+        if ".jpg" in lower or ".jpeg" in lower or ".png" in lower or ".webp" in lower:
+            return False
+        return (
+            ".mp4" in lower
+            or "mime_type=video" in lower
+            or "mime=video" in lower
+            or "/t50." in lower
+            or "/t16/" in lower
+            or "/o1/v/" in lower
         )
 
     @staticmethod

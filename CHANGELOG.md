@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6+53 Keep video posts as video
+- Pinterest HLS pins rewrite to a public pinimg MP4 instead of silently saving the poster JPG.
+- Instagram reels no longer save the `og:image` PNG poster when yt-dlp reports an audience restriction; Clipora tries public embed/video URLs and fails instead of returning a thumbnail.
+- Facebook `l.php` share wrappers unwrap to the real post, so a successful save is not followed by a fake failure or a second copy of the same file.
+- Duplicate in-flight shares are ignored for a few seconds so Android does not save the same link twice.
+
 ## 2.0.6+52 Public Threads share links
 - `/share/` links now follow the canonical public post instead of a login interstitial.
 - Threads extract misses are no longer labeled as a private/login-wall.

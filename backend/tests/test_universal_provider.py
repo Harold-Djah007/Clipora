@@ -403,7 +403,7 @@ def test_instagram_download_fallback_when_extract_raises(monkeypatch):
     assert post.platform == "instagram"
 
 
-def test_pinterest_hls_falls_back_to_pin_image(monkeypatch):
+def test_pinterest_hls_rewrites_to_progressive_mp4(monkeypatch):
     provider = UniversalProvider()
     info = {
         "id": "123456789",
@@ -426,6 +426,40 @@ def test_pinterest_hls_falls_back_to_pin_image(monkeypatch):
     }
     monkeypatch.setattr(provider, "_extract_info", lambda url: info)
     monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Install ffmpeg")))
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type="video",
+            url="/api/files/pinvid",
+            mime_type="video/mp4",
+            width=width,
+            height=height,
+        )
+        if media_type == "video" and url.endswith(".mp4")
+        else (_ for _ in ()).throw(RuntimeError("skip")),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.pinterest.com/pin/123456789/"))
+
+    assert post.platform == "pinterest"
+    assert post.media[0].media_type == "video"
+    assert post.media[0].url == "/api/files/pinvid"
+
+
+def test_pinterest_photo_pin_still_saves_image(monkeypatch):
+    provider = UniversalProvider()
+    info = {
+        "id": "123456789",
+        "uploader": "pin",
+        "url": "https://i.pinimg.com/originals/ab/cd/ef.jpg",
+        "ext": "jpg",
+        "thumbnails": [
+            {"url": "https://i.pinimg.com/originals/ab/cd/ef.jpg", "width": 1000, "height": 1500},
+        ],
+    }
+    monkeypatch.setattr(provider, "_extract_info", lambda url: info)
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
 
     post = asyncio.run(provider._resolve_with_ytdlp("https://www.pinterest.com/pin/123456789/"))
 
@@ -451,6 +485,77 @@ def test_instagram_photo_html_fallback_when_ytdlp_has_no_video(monkeypatch):
     assert post.platform == "instagram"
     assert post.media[0].media_type == "image"
     assert "photo.jpg" in post.media[0].url
+
+
+def test_instagram_reel_does_not_save_poster_png(monkeypatch):
+    provider = UniversalProvider()
+    html = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/poster.png">'
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This content isn't available to everyone: It can't be seen by certain audiences.")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(provider, "_fetch_public_html", lambda url, platform: html)
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip tunnel")),
+    )
+
+    try:
+        asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/Dcx91FCMXrJ/"))
+    except ValueError as exc:
+        assert "instagram" in str(exc).lower()
+        assert "poster.png" not in str(exc).lower()
+    else:
+        raise AssertionError("expected Instagram reels without a public video to fail instead of saving a poster")
+
+
+def test_instagram_reel_uses_embed_video_when_page_is_poster_only(monkeypatch):
+    provider = UniversalProvider()
+    poster = '<meta property="og:image" content="https://scontent.cdninstagram.com/v/t51/poster.png">'
+    embed = '{"video_versions":[{"url":"https://scontent.cdninstagram.com/v/t50.2886-16/clip.mp4"}]}'
+    monkeypatch.setattr(
+        provider,
+        "_extract_info",
+        lambda url: (_ for _ in ()).throw(ValueError("This content isn't available to everyone")),
+    )
+    monkeypatch.setattr(provider, "_download_to_cache", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        provider,
+        "_fetch_public_html",
+        lambda url, platform: embed if "/embed" in url else poster,
+    )
+    monkeypatch.setattr(
+        provider,
+        "_cache_http_media",
+        lambda url, media_type, source_url, index=1, width=None, height=None: UniversalMedia(
+            media_type=media_type,
+            url="/api/files/igreel",
+            mime_type="video/mp4" if media_type == "video" else "image/png",
+            width=width,
+            height=height,
+        ),
+    )
+
+    post = asyncio.run(provider._resolve_with_ytdlp("https://www.instagram.com/reel/Dcx91FCMXrJ/"))
+
+    assert post.platform == "instagram"
+    assert post.media[0].media_type == "video"
+    assert post.media[0].url == "/api/files/igreel"
+
+
+def test_facebook_lphp_unwraps_to_watch_url():
+    provider = UniversalProvider()
+    wrapped = "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.facebook.com%2Fwatch%2F%3Fv%3D1081678357921979&h=AT"
+    assert provider._unwrap_facebook_click_wrapper(wrapped) == "https://www.facebook.com/watch/?v=1081678357921979"
+
+
+def test_pinterest_hls_rewrite_builds_progressive_urls():
+    urls = UniversalProvider._pinterest_hls_to_mp4s("https://v.pinimg.com/videos/mc/hls/ab/cd/ef.m3u8")
+    assert any(item.endswith("/720p/ab/cd/ef.mp4") for item in urls)
+    assert any("v1.pinimg.com" in item for item in urls)
 
 
 def test_x_image_tweet_uses_fxtwitter_when_ytdlp_has_no_video(monkeypatch):
