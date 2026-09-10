@@ -1,8 +1,10 @@
 class ResolverUrl {
-  /// Empty means Field Mode: Clipora does not require a PC/local backend.
-  /// Users can still enter a LAN/USB/cloud resolver for platforms where a
-  /// backend gives better extraction.
-  static const defaultValue = '';
+  /// Optional production resolver baked into release builds.
+  ///
+  /// Build a stress-free APK with:
+  ///   flutter build apk --release --dart-define=CLIPORA_RESOLVER_URL=https://your-resolver-domain
+  /// When this is blank, Settings can still provide a hosted/LAN resolver.
+  static const defaultValue = String.fromEnvironment('CLIPORA_RESOLVER_URL', defaultValue: '');
 
   static const fallbacks = [
     'http://127.0.0.1:8010',
@@ -15,7 +17,7 @@ class ResolverUrl {
 
   static String normalize(String raw) {
     var value = raw.trim();
-    if (value.isEmpty) return defaultValue;
+    if (value.isEmpty) return defaultValue.trim();
     if (!value.contains('://')) value = 'http://$value';
     while (value.endsWith('/')) {
       value = value.substring(0, value.length - 1);
