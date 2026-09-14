@@ -60,9 +60,13 @@ class ResolverUrl {
 
     final out = <String>[];
     if (isAllowed(first)) out.add(first);
+    final firstUri = Uri.tryParse(first);
+    if (firstUri != null && !isPrivateHost(firstUri.host)) {
+      return List.unmodifiable(out);
+    }
     for (final item in fallbacks) {
       if (!out.contains(item)) out.add(item);
     }
-    return out;
+    return List.unmodifiable(out);
   }
 }

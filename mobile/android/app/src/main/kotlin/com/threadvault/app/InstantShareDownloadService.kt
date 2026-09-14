@@ -23,6 +23,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -135,10 +136,10 @@ class InstantShareDownloadService : Service() {
             ?: prefs.getString("resolverUrl", null)
             ?: ""
         val configured = normalizeBaseUrl(saved)
-        if (configured.isNotBlank()) return configured
         val bundled = normalizeBaseUrl(bundledResolverUrl())
+        if (configured.isNotBlank() && !isPrivateResolverUrl(configured)) return configured
         if (bundled.isNotBlank()) return bundled
-        return ""
+        return configured
     }
 
     private fun wifiOnlyEnabled(): Boolean {
@@ -160,11 +161,40 @@ class InstantShareDownloadService : Service() {
     }
 
     private fun resolvePost(baseUrl: String, sourceUrl: String): JSONObject {
+        val deadline = System.currentTimeMillis() + FREE_RESOLVER_WAKE_WINDOW_MS
+        var retryDelay = 2_000L
+        var attempt = 1
+        var lastError: Exception? = null
+
+        while (true) {
+            try {
+                return resolvePostOnce(baseUrl, sourceUrl)
+            } catch (error: Exception) {
+                if (!isRetryableResolverError(error) || System.currentTimeMillis() >= deadline) {
+                    if (lastError != null && isRetryableResolverError(error)) {
+                        throw IllegalStateException(
+                            "The free Clipora resolver did not wake in time. Share the link again; it should now be awake.",
+                            error,
+                        )
+                    }
+                    throw error
+                }
+                lastError = error
+                attempt++
+                updateProgress("Waking free resolver… attempt $attempt")
+                val remaining = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
+                Thread.sleep(retryDelay.coerceAtMost(remaining))
+                retryDelay = (retryDelay * 2).coerceAtMost(15_000L)
+            }
+        }
+    }
+
+    private fun resolvePostOnce(baseUrl: String, sourceUrl: String): JSONObject {
         val endpoint = URL("$baseUrl/api/resolve/universal")
         val body = JSONObject().put("url", sourceUrl).toString().toByteArray(Charsets.UTF_8)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 5000
+            connectTimeout = 15_000
             readTimeout = 180000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
@@ -180,9 +210,14 @@ class InstantShareDownloadService : Service() {
             }
             if (status !in 200..299) {
                 val detail = runCatching { JSONObject(response).optString("detail") }.getOrNull().orEmpty()
+                if (status in RETRYABLE_RESOLVER_STATUSES) {
+                    throw RetryableResolverException(detail.ifBlank { "Resolver is waking (HTTP $status)." })
+                }
                 throw IllegalStateException(detail.ifBlank { "Resolver returned HTTP $status." })
             }
-            return JSONObject(response)
+            return runCatching { JSONObject(response) }.getOrElse {
+                throw RetryableResolverException("Resolver returned an incomplete wake-up response.", it)
+            }
         } finally {
             conn.disconnect()
         }
@@ -350,6 +385,13 @@ class InstantShareDownloadService : Service() {
         private const val CHANNEL_ID = "clipora_instant_share"
         private const val COMPLETE_CHANNEL_ID = "clipora_instant_share_complete"
         private const val NOTIFICATION_ID = 7117
+        private const val FREE_RESOLVER_WAKE_WINDOW_MS = 90_000L
+        private val RETRYABLE_RESOLVER_STATUSES = setOf(408, 425, 429, 500, 502, 503, 504)
+
+        private class RetryableResolverException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+        private fun isRetryableResolverError(error: Exception): Boolean =
+            error is IOException || error is RetryableResolverException
 
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -382,6 +424,18 @@ class InstantShareDownloadService : Service() {
             if (!value.contains("://")) value = "https://$value"
             while (value.endsWith("/")) value = value.dropLast(1)
             return value
+        }
+
+        private fun isPrivateResolverUrl(raw: String): Boolean {
+            val host = runCatching { URL(raw).host.lowercase(Locale.US) }.getOrDefault("")
+            if (host == "localhost" || host == "::1") return true
+            val parts = host.split('.').mapNotNull { it.toIntOrNull() }
+            if (parts.size != 4) return false
+            val first = parts[0]
+            val second = parts[1]
+            return first == 127 || first == 10 ||
+                (first == 192 && second == 168) ||
+                (first == 172 && second in 16..31)
         }
 
         private fun absoluteUrl(baseUrl: String, raw: String): String {

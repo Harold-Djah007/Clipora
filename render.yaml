@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: clipora-resolver-harold
+    runtime: docker
+    plan: free
+    region: frankfurt
+    repo: https://github.com/Harold-Djah007/Clipora
+    branch: feature/universal-resolver-foundation
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: CLIPORA_ENV
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"

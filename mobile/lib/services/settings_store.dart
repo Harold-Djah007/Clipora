@@ -43,7 +43,14 @@ class SettingsStore {
       await p.setBool('clipora080TurboMigrated', true);
     }
 
-    final resolverUrl = p.getString('resolverUrl') ?? ResolverUrl.defaultValue;
+    var resolverUrl = p.getString('resolverUrl') ?? ResolverUrl.defaultValue;
+    final bundled = ResolverUrl.normalize(ResolverUrl.defaultValue);
+    final savedUri = Uri.tryParse(ResolverUrl.normalize(resolverUrl));
+    if (bundled.isNotEmpty && savedUri != null && ResolverUrl.isPrivateHost(savedUri.host)) {
+      // A field APK must not retain 127.0.0.1/LAN settings from USB testing.
+      resolverUrl = bundled;
+      await p.setString('resolverUrl', resolverUrl);
+    }
 
     return AppSettings(
       filenameTemplate: p.getString('filenameTemplate') ?? '{author}_{postId}_{index}',

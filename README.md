@@ -50,7 +50,21 @@ flutter build apk --debug --no-pub --dart-define=CLIPORA_RESOLVER_URL=http://127
 & "C:\Android\Sdk\platform-tools\adb.exe" install -r "build\app\outputs\flutter-apk\app-debug.apk"
 ```
 
-The native share service receives the same `CLIPORA_RESOLVER_URL` that Flutter receives. For a customer-ready APK, replace localhost with a stable HTTPS resolver URL.
+The native share service receives the same `CLIPORA_RESOLVER_URL` that Flutter receives. A hosted field build ignores stale localhost/LAN settings left by USB testing.
+
+## Free hosted field build
+
+1. Deploy the included Render Blueprint:
+
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Harold-Djah007/Clipora&branch=feature/universal-resolver-foundation)
+
+2. Wait for `/health` on the new `onrender.com` URL to return Clipora `2.0.8`.
+3. In GitHub, open **Actions → Build field APK → Run workflow**, paste that HTTPS URL, and run it.
+4. Download the `clipora-field-apk` artifact and install `app-release.apk` once.
+
+After that, normal use requires no PC backend, terminal, ADB reverse, pasted URL, or Save button. Sharing a supported link starts the background save and returns to the social app. The Android worker waits for a sleeping free Render service to wake and shows that state in its notification.
+
+Render documents that free web services sleep after 15 idle minutes and can take about one minute to wake. This free setup is suitable for field evaluation, but not an instant or production SLA. See [the field deployment guide](backend/docs/field-deployment.md).
 
 ## Backend checks
 
@@ -68,4 +82,4 @@ API endpoints:
 
 ## Release note
 
-The repository's release build currently falls back to Android's debug signing key until a production keystore is configured. Configure production signing before Play Store or customer distribution.
+The field workflow produces a release-mode APK for direct sideload testing. The repository currently falls back to Android's debug signing key; configure a stable private production keystore before Play Store publishing or distributing upgradeable production releases.

@@ -1,0 +1,54 @@
+name: Build field APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      resolver_url:
+        description: Public HTTPS Clipora resolver URL (for example, https://clipora-resolver.onrender.com)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-field-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CLIPORA_RESOLVER_URL: ${{ inputs.resolver_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+      - name: Validate hosted resolver URL
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          raw = os.environ["CLIPORA_RESOLVER_URL"].strip().rstrip("/")
+          parsed = urlparse(raw)
+          blocked = {"", "localhost", "127.0.0.1", "10.0.2.2"}
+          if parsed.scheme != "https" or parsed.hostname in blocked:
+              raise SystemExit("resolver_url must be a public HTTPS URL")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"CLIPORA_RESOLVER_URL={raw}\n")
+          PY
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Run tests
+        run: flutter test
+      - name: Build field APK
+        run: flutter build apk --release --no-pub --dart-define=CLIPORA_RESOLVER_URL="$CLIPORA_RESOLVER_URL"
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipora-field-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

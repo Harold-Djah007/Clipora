@@ -33,4 +33,11 @@ void main() {
     expect(urls.first, 'http://192.168.0.20:8010');
     expect(urls, contains('http://127.0.0.1:8010'));
   });
+
+  test('a hosted resolver never falls back to phone-local test ports', () {
+    expect(
+      ResolverUrl.candidates('https://clipora-resolver.onrender.com'),
+      ['https://clipora-resolver.onrender.com'],
+    );
+  });
 }
