@@ -1,6 +1,6 @@
 # PR summary
 
-Clipora 2.0.6 universal resolver and mobile hardening:
+Clipora 2.0.7 universal resolver and mobile hardening:
 
 - platform detection
 - yt-dlp resolver foundation
@@ -8,5 +8,5 @@ Clipora 2.0.6 universal resolver and mobile hardening:
 - tests
 - safety boundary docs
 - native share-to-background-download flow
-- TikTok short-link retries and concise resolver errors
+- maintained-extractor-first TikTok short-link retries and concise resolver errors
 - resolver-only mobile architecture without WebView capture

@@ -17,3 +17,8 @@ def test_public_error_removes_ansi_and_caps_detail():
 def test_public_error_explains_tiktok_homepage_redirect():
     message = public_resolver_error(RuntimeError("ERROR: Unsupported URL: https://www.tiktok.com/?_r=1"))
     assert message.startswith("TikTok did not release")
+
+
+def test_public_error_explains_tiktok_status_zero():
+    message = public_resolver_error(RuntimeError("ERROR: Video not available, status code 0"))
+    assert message.startswith("TikTok did not release")

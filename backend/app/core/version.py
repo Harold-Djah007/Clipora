@@ -1,2 +1,2 @@
 API_SERVICE_NAME = "clipora"
-API_VERSION = "2.0.6"
+API_VERSION = "2.0.7"

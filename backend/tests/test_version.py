@@ -3,4 +3,4 @@ from app.core.version import API_SERVICE_NAME, API_VERSION
 
 def test_api_version_marker():
     assert API_SERVICE_NAME == "clipora"
-    assert API_VERSION == "2.0.6"
+    assert API_VERSION == "2.0.7"

@@ -143,6 +143,11 @@ class UniversalProvider:
 
         media = self._dedupe_media(media)[: self._MAX_PLAYLIST_MEDIA]
         if not media:
+            if platform_info.platform == Platform.TIKTOK:
+                raise ValueError(
+                    "TikTok returned the post but did not expose a downloadable public video. "
+                    "The post may be expired, private, restricted, or unavailable from this resolver's network region."
+                )
             raise ValueError("No downloadable MP4/image media found for this link.")
 
         post_id = safe_filename_part(str(info.get("id") or info.get("display_id") or self._post_id_from_url(url) or "clipora"))
@@ -163,16 +168,19 @@ class UniversalProvider:
     def _extract_info(self, url: str) -> dict[str, Any]:
         platform = detect_platform(url).platform
         allow_playlist = platform not in {Platform.THREADS, Platform.YOUTUBE}
-        extractor_url = self._expand_tiktok_short_url(url) if platform == Platform.TIKTOK else url
-        opts = self._ydl_opts_for(extractor_url, allow_playlist=allow_playlist)
-        attempts = [(extractor_url, opts)]
+        opts = self._ydl_opts_for(url, allow_playlist=allow_playlist)
+        attempts = [(url, opts)]
         if platform == Platform.TIKTOK:
-            # Let yt-dlp/curl-cffi use its own browser profile. A forced mobile UA
-            # or short-link Referer can make TikTok redirect to `/?_r=1`.
-            browser_opts = dict(opts)
-            browser_opts["http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
-            browser_opts["impersonate"] = "chrome"
-            attempts.append((url, browser_opts))
+            # First give the original share URL to yt-dlp. Its maintained TikTokVM
+            # extractor resolves vt/vm links with TikTok's crawler redirect flow
+            # and applies browser impersonation internally where it is needed.
+
+            # Some TikTok edge nodes incorrectly send short links to `/?_r=1`.
+            # Recover a canonical post URL from the redirect chain when possible,
+            # but never replace the original yt-dlp attempt with this fallback.
+            expanded_url = self._expand_tiktok_short_url(url)
+            if expanded_url != url:
+                attempts.append((expanded_url, opts))
 
         last_error: Exception | None = None
         for attempt_url, attempt_opts in attempts:
@@ -200,20 +208,25 @@ class UniversalProvider:
             return url
 
         profiles = (
-            {"User-Agent": "facebookexternalhit/1.1"},
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            ({"User-Agent": "facebookexternalhit/1.1"}, "head"),
+            (
+                {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                "get",
+            ),
         )
-        for headers in profiles:
+        for headers, method in profiles:
             try:
                 with httpx.Client(follow_redirects=True, timeout=8.0, headers=headers) as client:
-                    response = client.get(url)
-                candidates = [str(response.url), response.headers.get("location", "")]
+                    response = client.head(url) if method == "head" else client.get(url)
+                redirect_responses = [*getattr(response, "history", []), response]
+                candidates = [str(item.url) for item in redirect_responses]
+                candidates.extend(item.headers.get("location", "") for item in redirect_responses)
                 candidates.extend(re.findall(r"https://(?:www\.)?tiktok\.com/@[^\s\"']+/(?:video|photo)/\d+", response.text))
                 for candidate in candidates:
                     target = urlparse(candidate)

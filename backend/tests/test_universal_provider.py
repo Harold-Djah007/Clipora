@@ -133,12 +133,43 @@ def test_tiktok_short_link_expansion_accepts_only_canonical_video(monkeypatch):
         def __exit__(self, *args):
             pass
 
-        def get(self, url):
+        def head(self, url):
             return Response()
 
     monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
     expanded = provider._expand_tiktok_short_url("https://vt.tiktok.com/ZSgU4uAMT/")
     assert expanded == Response.url
+
+
+def test_tiktok_short_link_expansion_checks_redirect_history(monkeypatch):
+    provider = UniversalProvider()
+
+    class Redirect:
+        url = "https://www.tiktok.com/@creator/video/7682000490246262048"
+        headers = {}
+
+    class Response:
+        url = "https://www.tiktok.com/?_r=1"
+        headers = {}
+        history = [Redirect()]
+        text = ""
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def head(self, url):
+            return Response()
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    expanded = provider._expand_tiktok_short_url("https://vt.tiktok.com/ZSgU4uAMT/")
+    assert expanded == Redirect.url
 
 
 def test_tiktok_short_link_expansion_rejects_homepage_redirect(monkeypatch):
@@ -159,9 +190,56 @@ def test_tiktok_short_link_expansion_rejects_homepage_redirect(monkeypatch):
         def __exit__(self, *args):
             pass
 
+        def head(self, url):
+            return Response()
+
         def get(self, url):
             return Response()
 
     monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
     short = "https://vt.tiktok.com/ZSgU4uAMT/"
     assert provider._expand_tiktok_short_url(short) == short
+
+
+def test_tiktok_extract_tries_original_before_canonical_fallback(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSgU4uAMT/"
+    canonical = "https://www.tiktok.com/@creator/video/7682000490246262048"
+    calls = []
+
+    monkeypatch.setattr(provider, "_expand_tiktok_short_url", lambda url: canonical)
+
+    def extract(url, opts):
+        calls.append((url, bool(opts.get("impersonate"))))
+        if url == canonical:
+            return {"id": "7682000490246262048"}
+        raise RuntimeError("TikTok redirect failed")
+
+    monkeypatch.setattr(provider, "_extract_info_with_opts", extract)
+
+    assert provider._extract_info(short)["id"] == "7682000490246262048"
+    assert calls == [(short, False), (canonical, False)]
+
+
+def test_tiktok_extract_does_not_pass_invalid_global_impersonation(monkeypatch):
+    provider = UniversalProvider()
+    short = "https://vt.tiktok.com/ZSgU4uAMT/"
+    seen_opts = []
+
+    monkeypatch.setattr(provider, "_expand_tiktok_short_url", lambda url: url)
+
+    def extract(url, opts):
+        seen_opts.append(opts)
+        raise RuntimeError("Video not available, status code 0")
+
+    monkeypatch.setattr(provider, "_extract_info_with_opts", extract)
+
+    try:
+        provider._extract_info(short)
+    except RuntimeError as error:
+        assert "status code 0" in str(error)
+    else:
+        raise AssertionError("Expected TikTok extraction failure")
+
+    assert len(seen_opts) == 1
+    assert "impersonate" not in seen_opts[0]
