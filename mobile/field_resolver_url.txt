@@ -1,0 +1,2 @@
+# After Render deploys, replace this comment with the resolver's HTTPS URL.
+# Example: https://clipora-resolver-harold.onrender.com

@@ -28,8 +28,17 @@ def test_field_apk_workflow_requires_public_https_resolver():
     workflow = (ROOT / ".github" / "workflows" / "field-apk.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
+    assert "push:" in workflow
     assert "resolver_url:" in workflow
+    assert "field_resolver_url.txt" in workflow
     assert 'parsed.scheme != "https"' in workflow
     assert "CLIPORA_RESOLVER_URL" in workflow
     assert "flutter build apk --release" in workflow
     assert "actions/upload-artifact@v4" in workflow
+
+
+def test_field_resolver_url_starts_unconfigured_without_fake_endpoint():
+    resolver_file = (ROOT / "mobile" / "field_resolver_url.txt").read_text(encoding="utf-8")
+
+    active_lines = [line for line in resolver_file.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert active_lines == []

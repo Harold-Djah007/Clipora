@@ -7,10 +7,10 @@ The repository includes a Render Blueprint at `/render.yaml`. It deploys the res
 1. Open the repository's **Deploy to Render** button and connect the `Harold-Djah007/Clipora` repository if prompted.
 2. Accept the Blueprint and wait for the service to become live.
 3. Open `https://YOUR-SERVICE.onrender.com/health`. Confirm `ok` is `true` and `version` is `2.0.8`.
-4. Open GitHub **Actions → Build field APK → Run workflow**.
-5. Enter the service's full HTTPS URL without `/health`, download the resulting `clipora-field-apk` artifact, and install `app-release.apk`.
+4. On GitHub, edit `mobile/field_resolver_url.txt`, replace the comments with the service's full HTTPS URL without `/health`, and commit to `feature/universal-resolver-foundation`.
+5. GitHub automatically runs **Build field APK**. Download the resulting `clipora-field-apk` artifact and install `app-release.apk`.
 
-The workflow rejects localhost and non-HTTPS resolver addresses. The URL is compiled into Flutter and Android's native instant-share service, so the field phone does not require Settings changes, ADB, or a computer.
+The workflow rejects localhost and non-HTTPS resolver addresses. The URL file is public and contains no credential. The URL is compiled into Flutter and Android's native instant-share service, so the field phone does not require Settings changes, ADB, or a computer.
 
 ## Free-tier behavior
 
