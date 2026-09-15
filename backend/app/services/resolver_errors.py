@@ -30,11 +30,22 @@ def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
         return "TikTok did not release this public video to the resolver. Clipora tried both the share link and its canonical post URL; retry once after the resolver is awake."
     if "unsupported url" in lower and "tiktok.com" in lower:
         return "TikTok redirected this share link away from its video and did not provide a canonical public post URL."
-    if "no video formats found" in lower or "no downloadable mp4/image" in lower:
+    if (
+        "no video formats found" in lower
+        or "no downloadable mp4/image" in lower
+        or "empty media response" in lower
+    ):
         return "The public post loaded, but the platform did not expose downloadable media to the resolver."
     if "http error 403" in lower or "status code 403" in lower:
         return "The social platform refused its temporary media link. Clipora did not pass the broken link to your phone; retry to request a fresh copy."
-    if "sign in" in lower or "login" in lower or "private" in lower:
+    if (
+        "sign in" in lower
+        or "login" in lower
+        or "logged-in" in lower
+        or "authentication" in lower
+        or "cookies-from-browser" in lower
+        or "private" in lower
+    ):
         return "This post is private or requires an account login. Clipora resolves public/shareable links only."
     if "ffmpeg" in lower:
         return "The resolver needs FFmpeg to combine this video's audio and picture. Install FFmpeg on the resolver and retry."
