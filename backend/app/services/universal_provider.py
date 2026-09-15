@@ -14,6 +14,7 @@ import httpx
 
 from app.services.file_cache import media_file_cache
 from app.services.platforms import Platform, detect_platform, ensure_supported_platform, safe_filename_part
+from app.services.session_config import httpx_session_options, ytdlp_session_options
 from app.services.social_page_provider import public_social_page_extractor
 from app.services.threads_provider import provider as threads_provider
 
@@ -257,6 +258,7 @@ class UniversalProvider:
 
     def _ydl_opts_for(self, url: str, allow_playlist: bool = False) -> dict[str, Any]:
         opts = dict(self._ydl_opts)
+        opts.update(ytdlp_session_options())
         headers = dict(self._ydl_opts.get("http_headers", {}))
         opts["http_headers"] = headers
         opts["noplaylist"] = not allow_playlist
@@ -468,7 +470,12 @@ class UniversalProvider:
         maximum = 300 * 1024 * 1024
 
         try:
-            with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(60.0, connect=20.0), headers=headers) as client:
+            with httpx.Client(
+                follow_redirects=True,
+                timeout=httpx.Timeout(60.0, connect=20.0),
+                headers=headers,
+                **httpx_session_options(),
+            ) as client:
                 with client.stream("GET", media.url) as response:
                     response.raise_for_status()
                     self._ensure_public_media_url(str(response.url))

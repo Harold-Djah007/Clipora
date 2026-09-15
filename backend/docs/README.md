@@ -4,3 +4,4 @@
 - `mobile-wire-up-next.md`: Flutter integration plan.
 - `test-links.md`: manual test checklist.
 - `safety-boundary.md`: product safety boundaries.
+- `platform-session.md`: optional Render cookies/proxy for login-gated public pages.

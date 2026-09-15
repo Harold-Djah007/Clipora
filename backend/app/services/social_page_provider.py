@@ -10,6 +10,7 @@ import httpx
 
 from app.services.platforms import Platform, ensure_supported_platform
 from app.services.resolver_errors import NoDirectMediaError
+from app.services.session_config import httpx_session_options
 
 
 class PublicSocialPageExtractor:
@@ -56,7 +57,12 @@ class PublicSocialPageExtractor:
             try:
                 page_headers = dict(headers)
                 page_headers["Referer"] = f"https://{urlparse(candidate).hostname or requested.hostname}/"
-                with httpx.Client(follow_redirects=True, timeout=20.0, headers=page_headers) as client:
+                with httpx.Client(
+                    follow_redirects=True,
+                    timeout=20.0,
+                    headers=page_headers,
+                    **httpx_session_options(),
+                ) as client:
                     response = client.get(candidate)
                 response.raise_for_status()
                 final_url = str(response.url)
@@ -80,7 +86,12 @@ class PublicSocialPageExtractor:
         # TikTok's public oEmbed endpoint often preserves the canonical @user/video
         # URL even when a cloud-hosted short-link request is redirected to /?_r=1.
         try:
-            with httpx.Client(follow_redirects=True, timeout=10.0, headers=self._BROWSER_HEADERS[0]) as client:
+            with httpx.Client(
+                follow_redirects=True,
+                timeout=10.0,
+                headers=self._BROWSER_HEADERS[0],
+                **httpx_session_options(),
+            ) as client:
                 response = client.get("https://www.tiktok.com/oembed", params={"url": url})
             if response.status_code == 200:
                 payload = response.json()
@@ -95,7 +106,12 @@ class PublicSocialPageExtractor:
         )
         for headers, method in profiles:
             try:
-                with httpx.Client(follow_redirects=True, timeout=10.0, headers=headers) as client:
+                with httpx.Client(
+                    follow_redirects=True,
+                    timeout=10.0,
+                    headers=headers,
+                    **httpx_session_options(),
+                ) as client:
                     response = client.head(url) if method == "head" else client.get(url)
                 chain = [*getattr(response, "history", []), response]
                 candidates.extend(str(item.url) for item in chain)

@@ -58,7 +58,7 @@ The native share service receives the same `CLIPORA_RESOLVER_URL` that Flutter r
 
    [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Harold-Djah007/Clipora&branch=feature/universal-resolver-foundation)
 
-2. Wait for `/health` on the new `onrender.com` URL to return Clipora `2.0.9`.
+2. Wait for `/health` on the new `onrender.com` URL to return Clipora `2.0.10`.
 3. On GitHub, edit [`mobile/field_resolver_url.txt`](mobile/field_resolver_url.txt), replace its comments with that HTTPS URL, and commit the edit to `feature/universal-resolver-foundation`.
 4. GitHub automatically runs **Build field APK**. Download its `clipora-field-apk` artifact and install `app-release.apk` once.
 

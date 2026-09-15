@@ -20,7 +20,11 @@ def test_service_root_is_a_useful_deployment_status_page():
     assert root() == {
         "ok": True,
         "service": "clipora",
-        "version": "2.0.9",
+        "version": "2.0.10",
         "health": "/health",
         "docs": "/docs",
+        "platform_session": {
+            "cookies_configured": False,
+            "proxy_configured": False,
+        },
     }

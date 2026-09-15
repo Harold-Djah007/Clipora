@@ -10,6 +10,7 @@ from app.services.file_cache import media_file_cache
 from app.services.threads_provider import provider
 from app.services.universal_provider import universal_provider
 from app.services.resolver_errors import public_resolver_error
+from app.services.session_config import session_status
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ class ResolveRequest(BaseModel):
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": API_SERVICE_NAME, "version": API_VERSION}
+    return {"ok": True, "service": API_SERVICE_NAME, "version": API_VERSION, **session_status()}
 
 @router.post("/detect")
 async def detect_platform(body: ResolveRequest):

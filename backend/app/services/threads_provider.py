@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.services.session_config import httpx_session_options
+
 
 @dataclass
 class ResolvedMedia:
@@ -175,7 +177,12 @@ class HttpThreadsProvider(ThreadsProvider):
                 "Accept-Language": "en-US,en;q=0.9",
             }
             try:
-                async with httpx.AsyncClient(follow_redirects=True, timeout=25.0, headers=headers) as client:
+                async with httpx.AsyncClient(
+                    follow_redirects=True,
+                    timeout=25.0,
+                    headers=headers,
+                    **httpx_session_options(),
+                ) as client:
                     response = await client.get(url)
                 response.raise_for_status()
                 if "threads." not in str(response.url):
