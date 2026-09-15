@@ -1,4 +1,5 @@
 from app.services.platforms import detect_platform
+from app.main import root
 
 
 def test_detect_contract_for_public_threads_link():
@@ -13,3 +14,13 @@ def test_detect_contract_for_public_x_link():
     assert info.platform.value == "x"
     assert info.needs_local_session is False
     assert info.supports_server_resolve is True
+
+
+def test_service_root_is_a_useful_deployment_status_page():
+    assert root() == {
+        "ok": True,
+        "service": "clipora",
+        "version": "2.0.9",
+        "health": "/health",
+        "docs": "/docs",
+    }

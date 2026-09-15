@@ -6,7 +6,7 @@ The repository includes a Render Blueprint at `/render.yaml`. It deploys the res
 
 1. Open the repository's **Deploy to Render** button and connect the `Harold-Djah007/Clipora` repository if prompted.
 2. Accept the Blueprint and wait for the service to become live.
-3. Open `https://YOUR-SERVICE.onrender.com/health`. Confirm `ok` is `true` and `version` is `2.0.8`.
+3. Open `https://YOUR-SERVICE.onrender.com/health`. Confirm `ok` is `true` and `version` is `2.0.9`.
 4. On GitHub, edit `mobile/field_resolver_url.txt`, replace the comments with the service's full HTTPS URL without `/health`, and commit to `feature/universal-resolver-foundation`.
 5. GitHub automatically runs **Build field APK**. Download the resulting `clipora-field-apk` artifact and install `app-release.apk`.
 

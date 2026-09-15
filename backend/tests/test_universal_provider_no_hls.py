@@ -155,3 +155,57 @@ def test_file_cache_roundtrip(tmp_path):
     token = cache.put(source, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     assert cache.get(token) == source
     assert cache.get("not-a-token") is None
+
+
+def test_protected_direct_media_is_cached_with_referer(monkeypatch, tmp_path):
+    provider = UniversalProvider()
+    seen = {}
+
+    class Response:
+        url = "https://cdn.example/video.mp4?fresh=1"
+        headers = {"content-type": "video/mp4", "content-length": "8"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def raise_for_status(self):
+            pass
+
+        @staticmethod
+        def iter_bytes(size):
+            yield b"ftypfake"
+
+    class Client:
+        def __init__(self, **kwargs):
+            seen["headers"] = kwargs["headers"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def stream(self, method, url):
+            return Response()
+
+    monkeypatch.setattr("app.services.universal_provider.httpx.Client", Client)
+    monkeypatch.setattr("app.services.universal_provider.tempfile.gettempdir", lambda: str(tmp_path))
+    media = provider._media_from_url("https://cdn.example/video.mp4?token=old", key_hint="video")
+    cached = provider._cache_direct_media(media, "https://www.tiktok.com/@creator/video/123")
+    assert cached.url.startswith("/api/files/")
+    assert cached.filesize == 8
+    assert seen["headers"]["Referer"] == "https://www.tiktok.com/"
+
+
+def test_direct_media_cache_rejects_private_addresses():
+    provider = UniversalProvider()
+    media = provider._media_from_url("https://127.0.0.1/video.mp4", key_hint="video")
+    try:
+        provider._cache_direct_media(media, "https://www.tiktok.com/@creator/video/123")
+    except ValueError as error:
+        assert "private media address" in str(error)
+    else:
+        raise AssertionError("Expected private CDN URL to be rejected")

@@ -1,6 +1,6 @@
 # PR summary
 
-Clipora 2.0.8 universal resolver and mobile hardening:
+Clipora 2.0.9 universal resolver and mobile hardening:
 
 - platform detection
 - yt-dlp resolver foundation

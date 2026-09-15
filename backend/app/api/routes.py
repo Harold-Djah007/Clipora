@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Header, HTTPException
+import mimetypes
+
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from app.core.version import API_SERVICE_NAME, API_VERSION
@@ -47,7 +49,7 @@ def get_resolved_file(token: str):
     path = media_file_cache.get(token)
     if path is None:
         raise HTTPException(404, "Resolved file expired. Save the link again.")
-    media_type = "video/mp4" if path.suffix.lower() == ".mp4" else None
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, filename=path.name, media_type=media_type)
 
 

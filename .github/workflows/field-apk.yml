@@ -6,7 +6,7 @@ on:
       - feature/universal-resolver-foundation
     paths:
       - .github/workflows/field-apk.yml
-      - mobile/field_resolver_url.txt
+      - mobile/**
   workflow_dispatch:
     inputs:
       resolver_url:

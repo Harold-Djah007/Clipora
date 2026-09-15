@@ -191,7 +191,8 @@ class InstantShareDownloadService : Service() {
 
     private fun resolvePostOnce(baseUrl: String, sourceUrl: String): JSONObject {
         val endpoint = URL("$baseUrl/api/resolve/universal")
-        val body = JSONObject().put("url", sourceUrl).toString().toByteArray(Charsets.UTF_8)
+        val normalizedSourceUrl = expandShareUrl(sourceUrl)
+        val body = JSONObject().put("url", normalizedSourceUrl).toString().toByteArray(Charsets.UTF_8)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
@@ -220,6 +221,61 @@ class InstantShareDownloadService : Service() {
             }
         } finally {
             conn.disconnect()
+        }
+    }
+
+    private fun expandShareUrl(sourceUrl: String): String {
+        val source = runCatching { URL(sourceUrl) }.getOrNull() ?: return sourceUrl
+        val host = source.host.lowercase(Locale.US)
+        val path = source.path.orEmpty()
+        val shouldExpand = host == "vt.tiktok.com" || host == "vm.tiktok.com" ||
+            ((host == "threads.com" || host.endsWith(".threads.com") || host == "threads.net" || host.endsWith(".threads.net")) && path.startsWith("/share/")) ||
+            host == "t.snapchat.com"
+        if (!shouldExpand) return sourceUrl
+
+        val userAgents = listOf(
+            "facebookexternalhit/1.1",
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36",
+        )
+        userAgents.forEach { userAgent ->
+            val conn = runCatching {
+                (source.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 7_000
+                    readTimeout = 7_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", userAgent)
+                    setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+                }
+            }.getOrNull() ?: return@forEach
+            try {
+                conn.responseCode
+                val candidate = conn.url.toString()
+                if (isUsefulExpandedUrl(sourceUrl, candidate)) return candidate
+            } catch (_: Exception) {
+                // The hosted resolver still receives the original short link.
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return sourceUrl
+    }
+
+    private fun isUsefulExpandedUrl(sourceUrl: String, candidate: String): Boolean {
+        val source = runCatching { URL(sourceUrl) }.getOrNull() ?: return false
+        val target = runCatching { URL(candidate) }.getOrNull() ?: return false
+        if (target.protocol != "https") return false
+        val sourceHost = source.host.lowercase(Locale.US)
+        val targetHost = target.host.lowercase(Locale.US)
+        val targetPath = target.path.orEmpty()
+        return when {
+            sourceHost.endsWith("tiktok.com") ->
+                targetHost.endsWith("tiktok.com") && Regex("/(video|photo)/\\d+").containsMatchIn(targetPath)
+            sourceHost.endsWith("threads.com") || sourceHost.endsWith("threads.net") ->
+                (targetHost.endsWith("threads.com") || targetHost.endsWith("threads.net")) && targetPath.contains("/post/")
+            sourceHost.endsWith("snapchat.com") ->
+                targetHost.endsWith("snapchat.com") && targetPath.isNotBlank() && targetPath != "/"
+            else -> false
         }
     }
 
@@ -467,7 +523,7 @@ class InstantShareDownloadService : Service() {
                 .replace(Regex("^(?:ERROR:\\s*)+", RegexOption.IGNORE_CASE), "")
                 .trim()
             if (text.contains("tiktok.com/?_r=1", ignoreCase = true) || text.contains("status code 0", ignoreCase = true)) {
-                return "TikTok did not release this video to the resolver. Retry, or use a hosted resolver."
+                return "TikTok did not release this public video. Clipora tried both the phone redirect and the hosted resolver; retry once."
             }
             if (text.isBlank()) return "The resolver could not extract downloadable media from this link."
             return if (text.length <= 280) text else text.take(279).trimEnd() + "…"

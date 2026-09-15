@@ -59,6 +59,10 @@ class ThreadsHtmlParser:
 
     def parse(self, source: str, post_url: str) -> ResolvedPost:
         source = html_lib.unescape(source)
+        meta = self._meta_values(source)
+        canonical_url = self._first(meta, "og:url") or post_url
+        if "threads." in canonical_url:
+            post_url = canonical_url
         post_id_m = self._post_id.search(post_url)
         author_m = self._author.search(post_url)
         post_id = post_id_m.group(1) if post_id_m else "thread"
@@ -74,6 +78,15 @@ class ThreadsHtmlParser:
             for match in re.finditer(r'https?:\\?/\\?/[^"<\s]+?\.mp4[^"<\s]*', source):
                 value = self._unescape(match.group(0))
                 if value.startswith("http"):
+                    media.append(ResolvedMedia("video", value))
+
+        # Link-preview metadata is the most stable fallback for Threads /share/
+        # URLs. Prefer an actual og:video over og:image so a video poster is never
+        # mistaken for the requested clip.
+        if not any(x.media_type == "video" for x in media):
+            for value in meta.get("og:video", []) + meta.get("og:video:url", []) + meta.get("og:video:secure_url", []):
+                value = self._unescape(value)
+                if value.startswith("https://"):
                     media.append(ResolvedMedia("video", value))
 
         image_blocks = re.finditer(
@@ -94,6 +107,12 @@ class ThreadsHtmlParser:
             if ("cdninstagram" in value or "fbcdn" in value) and not value.endswith(".mp4"):
                 media.append(ResolvedMedia("image", value))
 
+        if not media:
+            for value in meta.get("og:image", []) + meta.get("og:image:url", []) + meta.get("twitter:image", []):
+                value = self._unescape(value)
+                if value.startswith("https://"):
+                    media.append(ResolvedMedia("image", value))
+
         caption = None
         caption_patterns = [
             r'"caption"\s*:\s*\{[^}]*"text"\s*:\s*"(.*?)"',
@@ -105,6 +124,7 @@ class ThreadsHtmlParser:
                 caption = self._unescape(match.group(1)).strip() or None
                 if caption:
                     break
+        caption = caption or self._first(meta, "og:description", "twitter:description")
 
         # Keep stable order while removing duplicate CDN variants.
         unique: dict[str, ResolvedMedia] = {}
@@ -113,6 +133,24 @@ class ThreadsHtmlParser:
         if not unique:
             raise ValueError("No downloadable media found. The post may be private or unavailable.")
         return ResolvedPost(post_id=post_id, author=author, caption=caption, media=list(unique.values()))
+
+    @staticmethod
+    def _meta_values(source: str) -> dict[str, list[str]]:
+        values: dict[str, list[str]] = {}
+        for tag in re.findall(r"<meta\b[^>]*>", source, re.I):
+            attrs = {
+                key.lower(): html_lib.unescape(value)
+                for key, _, value in re.findall(r"([:\w-]+)\s*=\s*(['\"])(.*?)\2", tag, re.S)
+            }
+            name = (attrs.get("property") or attrs.get("name") or "").lower()
+            content = attrs.get("content", "").strip()
+            if name and content:
+                values.setdefault(name, []).append(content)
+        return values
+
+    @staticmethod
+    def _first(meta: dict[str, list[str]], *keys: str) -> Optional[str]:
+        return next((value for key in keys for value in meta.get(key, []) if value.strip()), None)
 
 
 class HttpThreadsProvider(ThreadsProvider):
@@ -125,16 +163,27 @@ class HttpThreadsProvider(ThreadsProvider):
         parsed = urlparse(url)
         if parsed.scheme != "https" or parsed.hostname not in self._allowed_hosts:
             raise ValueError("Only https://threads.com post URLs are accepted")
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36",
-            "Accept-Language": "en-GB,en;q=0.9",
-        }
-        async with httpx.AsyncClient(follow_redirects=True, timeout=25.0, headers=headers) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            if "threads." not in str(response.url):
-                raise ValueError("Threads redirected away from the requested post")
-            return self.parser.parse(response.text, url)
+        profiles = (
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+        )
+        last_error: Exception | None = None
+        for user_agent in profiles:
+            headers = {
+                "User-Agent": user_agent,
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=25.0, headers=headers) as client:
+                    response = await client.get(url)
+                response.raise_for_status()
+                if "threads." not in str(response.url):
+                    raise ValueError("Threads redirected away from the requested post")
+                return self.parser.parse(response.text, str(response.url))
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+        raise ValueError("Threads did not expose downloadable public media for this share link.") from last_error
 
 
 provider: ThreadsProvider = HttpThreadsProvider()

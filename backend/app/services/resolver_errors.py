@@ -27,9 +27,13 @@ def public_resolver_error(error: Exception, *, limit: int = 360) -> str:
 
     lower = text.lower()
     if "tiktok.com/?_r=1" in lower or "video not available, status code 0" in lower:
-        return "TikTok did not release this video to the resolver. Update yt-dlp, then retry; some posts may require a hosted resolver in another network region."
+        return "TikTok did not release this public video to the resolver. Clipora tried both the share link and its canonical post URL; retry once after the resolver is awake."
     if "unsupported url" in lower and "tiktok.com" in lower:
-        return "TikTok redirected this share link away from its video. Retry with the full TikTok video link or use a hosted resolver."
+        return "TikTok redirected this share link away from its video and did not provide a canonical public post URL."
+    if "no video formats found" in lower or "no downloadable mp4/image" in lower:
+        return "The public post loaded, but the platform did not expose downloadable media to the resolver."
+    if "http error 403" in lower or "status code 403" in lower:
+        return "The social platform refused its temporary media link. Clipora did not pass the broken link to your phone; retry to request a fresh copy."
     if "sign in" in lower or "login" in lower or "private" in lower:
         return "This post is private or requires an account login. Clipora resolves public/shareable links only."
     if "ffmpeg" in lower:

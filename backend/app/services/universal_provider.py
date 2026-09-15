@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
 import tempfile
 import uuid
@@ -13,6 +14,7 @@ import httpx
 
 from app.services.file_cache import media_file_cache
 from app.services.platforms import Platform, detect_platform, ensure_supported_platform, safe_filename_part
+from app.services.social_page_provider import public_social_page_extractor
 from app.services.threads_provider import provider as threads_provider
 
 try:  # yt-dlp is optional at import time so tests can still exercise validation paths.
@@ -75,7 +77,13 @@ class UniversalProvider:
     async def resolve(self, url: str) -> UniversalPost:
         platform_info = ensure_supported_platform(url)
         if platform_info.platform == Platform.THREADS:
-            return await self._resolve_threads(url)
+            try:
+                return await self._resolve_threads(url)
+            except Exception as threads_error:
+                try:
+                    return await self._resolve_with_ytdlp(url)
+                except Exception:
+                    raise threads_error
         return await self._resolve_with_ytdlp(url)
 
     async def detect(self, url: str) -> dict[str, Any]:
@@ -90,6 +98,18 @@ class UniversalProvider:
 
     async def _resolve_threads(self, url: str) -> UniversalPost:
         post = await threads_provider.resolve(url)
+        loop = asyncio.get_running_loop()
+        media: list[UniversalMedia] = []
+        for index, item in enumerate(post.media, start=1):
+            direct = UniversalMedia(
+                media_type=item.media_type,
+                url=item.url,
+                mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
+                width=item.width,
+                height=item.height,
+                quality=self._quality_label(item.width, item.height),
+            )
+            media.append(await loop.run_in_executor(None, self._cache_direct_media, direct, url, index))
         return UniversalPost(
             post_id=post.post_id,
             author=post.author,
@@ -97,17 +117,7 @@ class UniversalProvider:
             source_url=url,
             title=None,
             caption=post.caption,
-            media=[
-                UniversalMedia(
-                    media_type=item.media_type,
-                    url=item.url,
-                    mime_type="video/mp4" if item.media_type == "video" else self._image_mime_type(item.url),
-                    width=item.width,
-                    height=item.height,
-                    quality=self._quality_label(item.width, item.height),
-                )
-                for item in post.media
-            ],
+            media=media,
         )
 
     async def _resolve_with_ytdlp(self, url: str) -> UniversalPost:
@@ -117,6 +127,14 @@ class UniversalProvider:
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, self._extract_info, url)
         platform_info = ensure_supported_platform(url)
+        protected_media = platform_info.platform in {
+            Platform.THREADS,
+            Platform.TIKTOK,
+            Platform.INSTAGRAM,
+            Platform.X,
+            Platform.FACEBOOK,
+            Platform.SNAPCHAT,
+        }
         entries = self._entry_infos(info)
 
         media: list[UniversalMedia] = []
@@ -132,12 +150,27 @@ class UniversalProvider:
                     # This avoids mobile 403/HLS issues by letting the backend fetch
                     # the file and exposing it to the phone as /api/files/{token}.
                     entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
-                except Exception:
-                    if not entry_media:
+                except Exception as download_error:
+                    if entry_media:
+                        try:
+                            entry_media = [
+                                await loop.run_in_executor(None, self._cache_direct_media, item, url, index)
+                                for item in entry_media
+                            ]
+                        except Exception:
+                            if protected_media:
+                                raise download_error
+                    else:
                         raise
 
             if not entry_media and video_like:
                 entry_media = await loop.run_in_executor(None, self._download_to_cache, entry_url, entry, index)
+
+            if entry_media and not video_like and protected_media:
+                entry_media = [
+                    await loop.run_in_executor(None, self._cache_direct_media, item, url, index)
+                    for item in entry_media
+                ]
 
             media.extend(entry_media)
 
@@ -196,47 +229,24 @@ class UniversalProvider:
                         return self._extract_info_with_opts(attempt_url, fallback_opts)
                     except Exception as fallback_error:
                         last_error = fallback_error
+        if platform in {
+            Platform.THREADS,
+            Platform.TIKTOK,
+            Platform.INSTAGRAM,
+            Platform.FACEBOOK,
+            Platform.SNAPCHAT,
+        }:
+            try:
+                return public_social_page_extractor.extract(url)
+            except Exception:
+                pass
         assert last_error is not None
         raise last_error
 
     @staticmethod
     def _expand_tiktok_short_url(url: str) -> str:
         """Resolve vt/vm links before extraction without accepting off-site redirects."""
-
-        parsed = urlparse(url)
-        if (parsed.hostname or "").lower() not in {"vt.tiktok.com", "vm.tiktok.com"}:
-            return url
-
-        profiles = (
-            ({"User-Agent": "facebookexternalhit/1.1"}, "head"),
-            (
-                {
-                    "User-Agent": (
-                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-                "get",
-            ),
-        )
-        for headers, method in profiles:
-            try:
-                with httpx.Client(follow_redirects=True, timeout=8.0, headers=headers) as client:
-                    response = client.head(url) if method == "head" else client.get(url)
-                redirect_responses = [*getattr(response, "history", []), response]
-                candidates = [str(item.url) for item in redirect_responses]
-                candidates.extend(item.headers.get("location", "") for item in redirect_responses)
-                candidates.extend(re.findall(r"https://(?:www\.)?tiktok\.com/@[^\s\"']+/(?:video|photo)/\d+", response.text))
-                for candidate in candidates:
-                    target = urlparse(candidate)
-                    host = (target.hostname or "").lower()
-                    if host == "tiktok.com" or host.endswith(".tiktok.com"):
-                        if re.search(r"/(?:video|photo)/\d+", target.path):
-                            return candidate
-            except (httpx.HTTPError, ValueError):
-                continue
-        return url
+        return public_social_page_extractor.expand_tiktok_short_url(url)
 
     def _extract_info_with_opts(self, url: str, opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[union-attr]
@@ -284,7 +294,9 @@ class UniversalProvider:
 
     @staticmethod
     def _entry_url(entry: dict[str, Any], fallback: str) -> str:
-        for key in ("webpage_url", "original_url", "url"):
+        # `url` is commonly an expiring CDN file. Download the source page with
+        # yt-dlp first so it can refresh signatures, cookies and request headers.
+        for key in ("webpage_url", "original_url"):
             value = entry.get(key)
             if isinstance(value, str) and value.startswith(("http://", "https://")):
                 return value
@@ -427,6 +439,102 @@ class UniversalProvider:
                 quality=str(downloaded_info.get("format_note") or self._quality_label(width, height) or f"downloaded-{index}"),
             )
         ]
+
+    def _cache_direct_media(self, media: UniversalMedia, source_url: str, index: int = 1) -> UniversalMedia:
+        """Stream a protected CDN file into Clipora's cache with page headers.
+
+        TikTok, Instagram, Threads and Snapchat frequently bind media URLs to a
+        Referer/User-Agent and expire them quickly. Returning those URLs to Android
+        creates intermittent 403s, so the resolver owns the fetch and gives the APK
+        a stable same-origin `/api/files` URL instead.
+        """
+
+        self._ensure_public_media_url(media.url)
+        source = urlparse(source_url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+            ),
+            "Accept": "video/*,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{source.scheme}://{source.netloc}/" if source.netloc else source_url,
+        }
+        token = uuid.uuid4().hex
+        cache_dir = Path(tempfile.gettempdir()) / "clipora-media"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path: Path | None = None
+        total = 0
+        maximum = 300 * 1024 * 1024
+
+        try:
+            with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(60.0, connect=20.0), headers=headers) as client:
+                with client.stream("GET", media.url) as response:
+                    response.raise_for_status()
+                    self._ensure_public_media_url(str(response.url))
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                    if content_type in {"text/html", "application/json", "application/vnd.apple.mpegurl"}:
+                        raise ValueError("The media CDN returned a page instead of a downloadable file.")
+                    declared = self._int_or_none(response.headers.get("content-length"))
+                    if declared and declared > maximum:
+                        raise ValueError("The media file is larger than Clipora's 300 MB field limit.")
+                    suffix = self._suffix_for_media(media, content_type)
+                    path = cache_dir / f"{token}{suffix}"
+                    with path.open("wb") as output:
+                        for chunk in response.iter_bytes(1024 * 256):
+                            if not chunk:
+                                continue
+                            total += len(chunk)
+                            if total > maximum:
+                                raise ValueError("The media file is larger than Clipora's 300 MB field limit.")
+                            output.write(chunk)
+            if path is None or total == 0:
+                raise ValueError("The media CDN returned an empty file.")
+            media_file_cache.put(path, token)
+            return UniversalMedia(
+                media_type=media.media_type,
+                url=f"/api/files/{token}",
+                mime_type=content_type or media.mime_type,
+                width=media.width,
+                height=media.height,
+                filesize=total,
+                quality=media.quality or f"cached-{index}",
+            )
+        except Exception:
+            if path is not None:
+                path.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _ensure_public_media_url(url: str) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("The resolver rejected an unsafe media URL.")
+        host = parsed.hostname.lower()
+        if host == "localhost" or host.endswith(".local"):
+            raise ValueError("The resolver rejected an unsafe media host.")
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return
+        if not address.is_global:
+            raise ValueError("The resolver rejected a private media address.")
+
+    @staticmethod
+    def _suffix_for_media(media: UniversalMedia, content_type: str) -> str:
+        by_type = {
+            "video/mp4": ".mp4",
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+            "image/gif": ".gif",
+        }
+        if content_type in by_type:
+            return by_type[content_type]
+        path_suffix = Path(urlparse(media.url).path).suffix.lower()
+        if path_suffix in {".mp4", ".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+            return path_suffix
+        return ".mp4" if media.media_type == "video" else ".jpg"
 
     @staticmethod
     def _find_downloaded_file(cache_dir: Path, token: str) -> Optional[Path]:

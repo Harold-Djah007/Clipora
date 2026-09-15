@@ -29,6 +29,7 @@ def test_field_apk_workflow_requires_public_https_resolver():
 
     assert "workflow_dispatch:" in workflow
     assert "push:" in workflow
+    assert "mobile/**" in workflow
     assert "resolver_url:" in workflow
     assert "field_resolver_url.txt" in workflow
     assert 'parsed.scheme != "https"' in workflow
@@ -37,8 +38,12 @@ def test_field_apk_workflow_requires_public_https_resolver():
     assert "actions/upload-artifact@v4" in workflow
 
 
-def test_field_resolver_url_starts_unconfigured_without_fake_endpoint():
+def test_field_resolver_url_is_empty_or_a_public_https_endpoint():
     resolver_file = (ROOT / "mobile" / "field_resolver_url.txt").read_text(encoding="utf-8")
 
     active_lines = [line for line in resolver_file.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-    assert active_lines == []
+    assert len(active_lines) <= 1
+    if active_lines:
+        assert active_lines[0].startswith("https://")
+        assert "localhost" not in active_lines[0]
+        assert "127.0.0.1" not in active_lines[0]
